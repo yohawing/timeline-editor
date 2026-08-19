@@ -92,6 +92,18 @@ const EMPTY_PLAYBACK: TimelinePlaybackSnapshot = {
   looping: false,
 };
 
+const TIMELINE_RATE_STEPS = [0.25, 0.5, 1, 2] as const;
+
+function nextTimelineRate(rate: number): number {
+  const index = TIMELINE_RATE_STEPS.indexOf(rate as (typeof TIMELINE_RATE_STEPS)[number]);
+  const fallback = TIMELINE_RATE_STEPS.indexOf(1);
+  return TIMELINE_RATE_STEPS[(index === -1 ? fallback : index + 1) % TIMELINE_RATE_STEPS.length];
+}
+
+function formatTimelineRate(rate: number): string {
+  return `${rate}x`;
+}
+
 function pixelsPerSecondFromZoom(zoomPercent: number): number {
   const percent = Math.min(100, Math.max(0, Number.isFinite(zoomPercent) ? zoomPercent : DEFAULT_ZOOM_PERCENT));
   return MIN_PIXELS_PER_SECOND + (MAX_PIXELS_PER_SECOND - MIN_PIXELS_PER_SECOND) * percent / 100;
@@ -130,6 +142,9 @@ function normalizePlaybackSnapshot(value: unknown): TimelinePlaybackSnapshot {
   const sampledAtUnixMs = typeof raw.sampledAtUnixMs === "number" && Number.isFinite(raw.sampledAtUnixMs) && raw.sampledAtUnixMs >= 0
     ? raw.sampledAtUnixMs
     : undefined;
+  const rate = available && typeof raw.rate === "number" && Number.isFinite(raw.rate) && raw.rate > 0
+    ? raw.rate
+    : undefined;
   return {
     available,
     time,
@@ -138,6 +153,7 @@ function normalizePlaybackSnapshot(value: unknown): TimelinePlaybackSnapshot {
     looping: available && raw.looping === true,
     target: available && isPlaybackTarget(raw.target) ? raw.target : null,
     ...(sampledAtUnixMs === undefined ? {} : { sampledAtUnixMs }),
+    ...(rate === undefined ? {} : { rate }),
   };
 }
 
@@ -147,6 +163,7 @@ function samePlaybackSnapshot(left: TimelinePlaybackSnapshot, right: TimelinePla
     left.duration === right.duration &&
     left.playing === right.playing &&
     left.looping === right.looping &&
+    (left.rate ?? 1) === (right.rate ?? 1) &&
     left.target?.instanceId === right.target?.instanceId &&
     left.target?.clipIndex === right.target?.clipIndex &&
     left.sampledAtUnixMs === right.sampledAtUnixMs;
@@ -603,10 +620,12 @@ export function TimelineEditor({
     | { type: "play" }
     | { type: "pause" }
     | { type: "seek"; time: number }
-    | { type: "setLooping"; looping: boolean };
+    | { type: "setLooping"; looping: boolean }
+    | { type: "setRate"; rate: number };
   const dispatchTransport = (command: UntargetedPlaybackCommand) => {
     dispatchSafely(playbackController, { ...command, target: commandTarget } as TimelinePlaybackCommand, onDiagnostic);
   };
+  const playbackRate = playbackSnapshot.rate ?? 1;
 
   return (
     <section className={rootClassName} aria-label="Timeline editor">
@@ -620,6 +639,15 @@ export function TimelineEditor({
             <button type="button" className="timeline-editor__button" disabled={!canTransport} aria-label="Play" onClick={() => dispatchTransport({ type: "play" })}>▶</button>
             <button type="button" className="timeline-editor__button" disabled={!canTransport} aria-label="Pause" onClick={() => dispatchTransport({ type: "pause" })}>▮▮</button>
             <button type="button" className={`timeline-editor__button${playbackSnapshot.looping ? " is-active" : ""}`} disabled={!canTransport} aria-label="Loop" onClick={() => dispatchTransport({ type: "setLooping", looping: !playbackSnapshot.looping })}>↻</button>
+            <button
+              type="button"
+              className={`timeline-editor__button timeline-editor__button--rate${playbackRate !== 1 ? " is-active" : ""}`}
+              disabled={!canTransport}
+              aria-label="Playback rate"
+              onClick={() => dispatchTransport({ type: "setRate", rate: nextTimelineRate(playbackRate) })}
+            >
+              {formatTimelineRate(playbackRate)}
+            </button>
           </div>
           <button ref={readoutRef} type="button" className="timeline-editor__readout" onClick={() => setDisplayMode((mode) => mode === "frames" ? "seconds" : "frames")} aria-label="Toggle time display">{playbackReadout}</button>
           <label className="timeline-editor__zoom">Zoom

@@ -9,6 +9,12 @@ export interface TimelinePlaybackSnapshot {
   readonly duration: number;
   readonly playing: boolean;
   readonly looping: boolean;
+  /**
+   * Playback rate multiplier applied to elapsed time (1 = normal speed).
+   * Optional for backward compatibility: a controller that does not report
+   * `rate` is treated as fixed at 1x. Consumers must not assume presence.
+   */
+  readonly rate?: number;
   /** Runtime target represented by this snapshot, when available. */
   readonly target?: TimelinePlaybackTarget | null;
   /** Unix-ms sample time used for local projection while playing. */
@@ -23,7 +29,8 @@ export type TimelinePlaybackCommand =
   | ({ type: "play" } & TargetedPlaybackCommand)
   | ({ type: "pause" } & TargetedPlaybackCommand)
   | ({ type: "seek"; time: number } & TargetedPlaybackCommand)
-  | ({ type: "setLooping"; looping: boolean } & TargetedPlaybackCommand);
+  | ({ type: "setLooping"; looping: boolean } & TargetedPlaybackCommand)
+  | ({ type: "setRate"; rate: number } & TargetedPlaybackCommand);
 
 export interface TimelinePlaybackController {
   getSnapshot(): TimelinePlaybackSnapshot;
@@ -57,7 +64,8 @@ export function projectTimelinePlaybackTime(
   const duration = Number.isFinite(snapshot.duration) && snapshot.duration >= 0 ? snapshot.duration : 0;
   const base = clampTimelineTime(snapshot.time, duration);
   if (!snapshot.available || !snapshot.playing || !Number.isFinite(snapshot.sampledAtUnixMs)) return base;
-  const elapsed = Math.max(0, nowUnixMs - (snapshot.sampledAtUnixMs ?? nowUnixMs)) / 1000;
+  const rate = Number.isFinite(snapshot.rate) && (snapshot.rate as number) > 0 ? (snapshot.rate as number) : 1;
+  const elapsed = (Math.max(0, nowUnixMs - (snapshot.sampledAtUnixMs ?? nowUnixMs)) / 1000) * rate;
   const projected = base + elapsed;
   if (snapshot.looping && duration > 0) return projected % duration;
   return Math.min(duration, projected);
@@ -71,6 +79,7 @@ export function createLocalPlaybackController(duration: number, initialTime = 0)
     duration,
     playing: false,
     looping: false,
+    rate: 1,
     target: null,
     sampledAtUnixMs: Date.now(),
   };
@@ -88,7 +97,8 @@ export function createLocalPlaybackController(duration: number, initialTime = 0)
     lastTick = performance.now();
     timer = setInterval(() => {
       const now = performance.now();
-      const delta = Math.max(0, now - lastTick) / 1000;
+      const rate = Number.isFinite(snapshot.rate) && (snapshot.rate as number) > 0 ? (snapshot.rate as number) : 1;
+      const delta = (Math.max(0, now - lastTick) / 1000) * rate;
       lastTick = now;
       let time = snapshot.time + delta;
       let playing = true;
@@ -121,6 +131,12 @@ export function createLocalPlaybackController(duration: number, initialTime = 0)
           snapshot = { ...snapshot, target: command.target, looping: command.looping };
           notify();
           break;
+        case "setRate": {
+          const rate = Number.isFinite(command.rate) && command.rate > 0 ? command.rate : 1;
+          snapshot = { ...snapshot, target: command.target, rate };
+          notify();
+          break;
+        }
       }
     },
   };
