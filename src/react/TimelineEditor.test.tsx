@@ -1,0 +1,118 @@
+/** @vitest-environment jsdom */
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { timelineId, type TimelineDataSource } from "../core/contracts";
+import type { TimelinePlaybackController, TimelinePlaybackSnapshot } from "../core/playback";
+import { TimelineEditor } from "./TimelineEditor";
+
+const target = { instanceId: "test-instance", clipIndex: 1 };
+const rowId = timelineId<"row">("target-row");
+
+function source(): TimelineDataSource {
+  const row = { id: rowId, label: "Target Track", kind: "track" as const, depth: 0, color: "#678" };
+  return {
+    subscribe: () => () => undefined,
+    getRevision: () => 1,
+    getDomain: () => ({ kind: "seconds" }),
+    getRange: () => ({ start: 0, end: 10 }),
+    getGroups: () => [],
+    getBindings: () => [],
+    getRowCount: () => 1,
+    getRows: () => [row],
+    getPlaybackTarget: (id) => id === rowId ? target : null,
+    getItems: () => [],
+    getKeys: () => [],
+  };
+}
+
+function controller(overrides: Partial<TimelinePlaybackSnapshot> = {}): TimelinePlaybackController & { dispatch: ReturnType<typeof vi.fn> } {
+  const snapshot: TimelinePlaybackSnapshot = {
+    available: true,
+    time: 1,
+    duration: 10,
+    playing: false,
+    looping: false,
+    target,
+    sampledAtUnixMs: Date.now(),
+    ...overrides,
+  };
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: () => () => undefined,
+    dispatch: vi.fn(),
+  };
+}
+
+beforeEach(() => {
+  const context = {
+    setTransform: vi.fn(), clearRect: vi.fn(), save: vi.fn(), restore: vi.fn(), translate: vi.fn(),
+    beginPath: vi.fn(), closePath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), arcTo: vi.fn(), arc: vi.fn(),
+    fill: vi.fn(), stroke: vi.fn(), fillRect: vi.fn(), rect: vi.fn(), clip: vi.fn(), fillText: vi.fn(),
+  } as unknown as CanvasRenderingContext2D;
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context);
+  class TestResizeObserver {
+    observe = vi.fn();
+    disconnect = vi.fn();
+  }
+  vi.stubGlobal("ResizeObserver", TestResizeObserver);
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => window.setTimeout(() => callback(Date.now()), 0));
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => window.clearTimeout(id));
+  if (!HTMLElement.prototype.setPointerCapture) Object.defineProperty(HTMLElement.prototype, "setPointerCapture", { value: () => undefined, configurable: true, writable: true });
+  if (!HTMLElement.prototype.releasePointerCapture) Object.defineProperty(HTMLElement.prototype, "releasePointerCapture", { value: () => undefined, configurable: true, writable: true });
+  if (!HTMLElement.prototype.hasPointerCapture) Object.defineProperty(HTMLElement.prototype, "hasPointerCapture", { value: () => true, configurable: true, writable: true });
+  vi.spyOn(HTMLElement.prototype, "setPointerCapture").mockImplementation(() => undefined);
+  vi.spyOn(HTMLElement.prototype, "releasePointerCapture").mockImplementation(() => undefined);
+  vi.spyOn(HTMLElement.prototype, "hasPointerCapture").mockReturnValue(true);
+});
+afterEach(() => cleanup());
+
+describe("TimelineEditor transport and interaction boundary", () => {
+  it("keeps transport disabled without a controller", () => {
+    render(<TimelineEditor dataSource={source()} />);
+    expect((screen.getByRole("button", { name: "Play" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Pause" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Loop" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("selects a row target by mouse and keyboard and sends target commands", () => {
+    const playback = controller();
+    render(<TimelineEditor dataSource={source()} playbackController={playback} />);
+    const row = screen.getByRole("button", { name: /Select playback target Target Track/ });
+    fireEvent.click(row);
+    expect(row.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.keyDown(row, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    expect(playback.dispatch).toHaveBeenCalledWith({ type: "play", target });
+  });
+
+  it("restores scrub origin on pointercancel and dispatches the origin seek", () => {
+    const playback = controller();
+    render(<TimelineEditor dataSource={source()} playbackController={playback} />);
+    const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
+    Object.defineProperty(viewport, "getBoundingClientRect", { value: () => ({ left: 0, top: 0, width: 300, height: 100 }) });
+    const pointerDown = new Event("pointerdown", { bubbles: true });
+    Object.assign(pointerDown, { button: 0, pointerId: 1, clientX: 10 });
+    fireEvent(viewport, pointerDown);
+    expect(playback.dispatch).toHaveBeenCalled();
+    const pointerMove = new Event("pointermove", { bubbles: true });
+    Object.assign(pointerMove, { pointerId: 1, clientX: 100 });
+    fireEvent(viewport, pointerMove);
+    const pointerCancel = new Event("pointercancel", { bubbles: true });
+    Object.assign(pointerCancel, { pointerId: 1, clientX: 100 });
+    fireEvent(viewport, pointerCancel);
+    expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 1, target });
+  });
+
+  it("reports rejected async commands and follows display props", async () => {
+    const playback = controller();
+    playback.dispatch.mockRejectedValue(new Error("transport down"));
+    const onDiagnostic = vi.fn();
+    const view = render(<TimelineEditor dataSource={source()} playbackController={playback} frameRate={30} onDiagnostic={onDiagnostic} displayMode="frames" variant="compact" />);
+    expect(document.querySelector(".timeline-editor--compact")).toBeTruthy();
+    expect(screen.getByText("30 fps")).toBeTruthy();
+    view.rerender(<TimelineEditor dataSource={source()} playbackController={playback} frameRate={30} onDiagnostic={onDiagnostic} displayMode="seconds" variant="full" />);
+    expect(document.querySelector(".timeline-editor--full")).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Play" })); await Promise.resolve(); });
+    expect(onDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ level: "error", source: "timeline" }));
+  });
+});

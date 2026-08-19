@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+examples/react-vite/dist/
+test-results/
+playwright-report/
+*.tsbuildinfo

@@ -1,0 +1,52 @@
+{
+  "name": "@yohawing/timeline-editor",
+  "version": "0.1.0-rc.1",
+  "description": "A transport-neutral React and Canvas read-only timeline editor.",
+  "license": "MIT",
+  "private": false,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "files": ["dist", "README.md", "LICENSE"],
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/types/core/index.d.ts",
+      "import": "./dist/core.js"
+    },
+    "./styles.css": "./dist/timeline.css",
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/types/index.d.ts",
+  "scripts": {
+    "dev": "vite --config examples/react-vite/vite.config.ts",
+    "build": "tsc -p tsconfig.build.json && node scripts/emit-css-type.mjs && vite build",
+    "build:example": "vite build --config examples/react-vite/vite.config.ts",
+    "test": "vitest run",
+    "test:browser": "playwright test",
+    "test:perf": "playwright test tests/e2e/performance.spec.ts",
+    "pack": "npm pack --dry-run",
+    "verify": "npm run test && npm run build && npm run build:example && npm run test:browser && npm run pack",
+    "prepare": "npm run build"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0 || ^19.0.0",
+    "react-dom": "^18.2.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "@playwright/test": "^1.52.0",
+    "@testing-library/react": "^16.2.0",
+    "jsdom": "^26.1.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.4",
+    "vitest": "^3.2.4"
+  }
+}
