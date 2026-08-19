@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { timelineId, type TimelineDataSource } from "../core/contracts";
 import type { TimelinePlaybackController, TimelinePlaybackSnapshot } from "../core/playback";
@@ -74,6 +75,27 @@ describe("TimelineEditor transport and interaction boundary", () => {
     expect((screen.getByRole("button", { name: "Loop" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("disables transport and sanitizes malformed host playback state", () => {
+    const malformed = {
+      available: true,
+      time: Number.NaN,
+      duration: -4,
+      playing: true,
+      looping: true,
+      target: { instanceId: "", clipIndex: -1 },
+      sampledAtUnixMs: Number.NaN,
+    } as unknown as TimelinePlaybackSnapshot;
+    const playback: TimelinePlaybackController = {
+      getSnapshot: () => ({ ...malformed, target: malformed.target }),
+      subscribe: () => () => undefined,
+      dispatch: vi.fn(),
+    };
+    render(<TimelineEditor dataSource={source()} playbackController={playback} />);
+    expect((screen.getByRole("button", { name: "Play" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(document.body.innerHTML).not.toContain("NaN");
+    expect(document.body.innerHTML).not.toContain("Infinity");
+  });
+
   it("selects a row target by mouse and keyboard and sends target commands", () => {
     const playback = controller();
     render(<TimelineEditor dataSource={source()} playbackController={playback} />);
@@ -93,7 +115,7 @@ describe("TimelineEditor transport and interaction boundary", () => {
     const pointerDown = new Event("pointerdown", { bubbles: true });
     Object.assign(pointerDown, { button: 0, pointerId: 1, clientX: 10 });
     fireEvent(viewport, pointerDown);
-    expect(playback.dispatch).toHaveBeenCalled();
+    expect(playback.dispatch).not.toHaveBeenCalled();
     const pointerMove = new Event("pointermove", { bubbles: true });
     Object.assign(pointerMove, { pointerId: 1, clientX: 100 });
     fireEvent(viewport, pointerMove);
@@ -101,6 +123,33 @@ describe("TimelineEditor transport and interaction boundary", () => {
     Object.assign(pointerCancel, { pointerId: 1, clientX: 100 });
     fireEvent(viewport, pointerCancel);
     expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 1, target });
+  });
+
+  it("does not re-render while pointermove previews the scrub imperatively", () => {
+    const playback = controller();
+    const renders: string[] = [];
+    render(
+      <Profiler id="timeline" onRender={() => renders.push("render")}>
+        <TimelineEditor dataSource={source()} playbackController={playback} />
+      </Profiler>,
+    );
+    const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
+    Object.defineProperty(viewport, "getBoundingClientRect", { value: () => ({ left: 0, top: 0, width: 300, height: 100 }) });
+    act(() => {
+      const pointerDown = new Event("pointerdown", { bubbles: true });
+      Object.assign(pointerDown, { button: 0, pointerId: 1, clientX: 10 });
+      fireEvent(viewport, pointerDown);
+    });
+    const afterDown = renders.length;
+    act(() => {
+      for (const clientX of [30, 60, 100, 140]) {
+        const pointerMove = new Event("pointermove", { bubbles: true });
+        Object.assign(pointerMove, { pointerId: 1, clientX });
+        fireEvent(viewport, pointerMove);
+      }
+    });
+    expect(renders.length).toBe(afterDown);
+    expect(playback.dispatch).not.toHaveBeenCalled();
   });
 
   it("reports rejected async commands and follows display props", async () => {

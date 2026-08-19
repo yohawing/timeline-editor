@@ -20,6 +20,35 @@ test("supports compact variant, FPS formatting and display switch", async ({ pag
   await expect(readout).toContainText("s");
 });
 
+test("updates Canvas layout when zoom changes", async ({ page }) => {
+  await page.goto("/");
+  const zoom = page.getByRole("slider", { name: "Timeline zoom" });
+  const content = page.locator(".timeline-editor__content");
+  const before = await content.evaluate((element) => element.getBoundingClientRect().width);
+  await zoom.fill("90");
+  await expect.poll(() => content.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(before);
+});
+
+test("repaints for ResizeObserver and device-pixel-ratio changes", async ({ page }) => {
+  await page.goto("/");
+  const canvas = page.locator("canvas.timeline-editor__canvas");
+  const initial = await canvas.evaluate((element) => ({
+    width: element.width,
+    cssWidth: Number.parseFloat(getComputedStyle(element).width),
+  }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect.poll(() => canvas.evaluate((element) => Number.parseFloat(getComputedStyle(element).width))).toBeGreaterThan(initial.cssWidth);
+  await page.evaluate(() => {
+    Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 2 });
+    window.dispatchEvent(new Event("resize"));
+  });
+  await expect.poll(() => canvas.evaluate((element) => element.width)).toBeGreaterThan(initial.width);
+  await expect.poll(async () => {
+    const value = await canvas.evaluate((element) => ({ width: element.width, cssWidth: Number.parseFloat(getComputedStyle(element).width) }));
+    return Math.abs(value.width - Math.round(value.cssWidth * 2)) <= 1;
+  }).toBe(true);
+});
+
 test("scrub pointer capture and cancel restore the origin", async ({ page }) => {
   await page.goto("/");
   const viewport = page.locator(".timeline-editor__viewport");
@@ -34,6 +63,21 @@ test("scrub pointer capture and cancel restore the origin", async ({ page }) => 
   await viewport.dispatchEvent("pointercancel", { pointerId: 1, bubbles: true });
   await page.mouse.up();
   await expect(readout).toHaveText(before ?? "");
+});
+
+test("disables transport and keeps finite layout for malformed host playback", async ({ page }) => {
+  await page.goto("/?malformed=1");
+  await expect(page.getByRole("button", { name: "Play", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeDisabled();
+  await expect(page.locator(".timeline-editor")).not.toContainText("NaN");
+  await expect(page.locator(".timeline-editor")).not.toContainText("Infinity");
+});
+
+test("reports an asynchronous transport rejection", async ({ page }) => {
+  const rejection = page.waitForEvent("console", (message) => message.text().includes("Playback command failed"));
+  await page.goto("/?reject=1");
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await rejection;
 });
 
 test("stress mode queries only a bounded virtualized page", async ({ page }) => {

@@ -5,17 +5,46 @@ import {
   createFixtureTimelineDataSource,
   createLocalPlaybackController,
   createStressTimelineDataSource,
+  type TimelinePlaybackController,
 } from "@yohawing/timeline-editor/core";
 import "@yohawing/timeline-editor/styles.css";
 import "./example.css";
+
+function createMalformedPlaybackController(): TimelinePlaybackController {
+  const snapshot = {
+    available: true,
+    time: Number.NaN,
+    duration: -4,
+    playing: true,
+    looping: true,
+    target: { instanceId: "", clipIndex: -1 },
+    sampledAtUnixMs: Number.NaN,
+  } as const;
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: () => () => undefined,
+    dispatch: () => undefined,
+  };
+}
 
 function Example(): JSX.Element {
   const params = new URLSearchParams(window.location.search);
   const stress = params.get("stress") === "1";
   const variant = params.get("variant") === "compact" ? "compact" : "full";
   const fps = Number(params.get("fps") ?? 24);
+  const malformed = params.get("malformed") === "1";
+  const reject = params.get("reject") === "1";
   const dataSource = useMemo(() => stress ? createStressTimelineDataSource() : createFixtureTimelineDataSource(), [stress]);
-  const playbackController = useMemo(() => createLocalPlaybackController(12, 0), []);
+  const playbackController = useMemo(() => {
+    if (malformed) return createMalformedPlaybackController();
+    const local = createLocalPlaybackController(12, 0);
+    if (!reject) return local;
+    return {
+      getSnapshot: local.getSnapshot,
+      subscribe: local.subscribe,
+      dispatch: () => Promise.reject(new Error("example transport rejected")),
+    } satisfies TimelinePlaybackController;
+  }, [malformed, reject]);
   return (
     <main className="example-shell">
       <header className="example-heading">

@@ -104,6 +104,54 @@ function safeRange(dataSource: TimelineDataSource): { start: number; end: number
   return { start, end };
 }
 
+function safeDevicePixelRatio(): number {
+  if (typeof window === "undefined") return 1;
+  const value = window.devicePixelRatio;
+  return Number.isFinite(value) && value > 0 ? Math.max(1, value) : 1;
+}
+
+function isPlaybackTarget(value: unknown): value is TimelinePlaybackTarget {
+  if (!value || typeof value !== "object") return false;
+  const target = value as { instanceId?: unknown; clipIndex?: unknown };
+  return typeof target.instanceId === "string" && target.instanceId.length > 0 &&
+    Number.isSafeInteger(target.clipIndex) && (target.clipIndex as number) >= 0;
+}
+
+/** Keep malformed host snapshots away from layout, Canvas, and transport controls. */
+function normalizePlaybackSnapshot(value: unknown): TimelinePlaybackSnapshot {
+  if (!value || typeof value !== "object") return EMPTY_PLAYBACK;
+  const raw = value as Partial<Record<keyof TimelinePlaybackSnapshot, unknown>>;
+  const durationIsValid = typeof raw.duration === "number" && Number.isFinite(raw.duration) && raw.duration >= 0;
+  const timeIsValid = typeof raw.time === "number" && Number.isFinite(raw.time) && raw.time >= 0;
+  const targetIsValid = raw.target === undefined || raw.target === null || isPlaybackTarget(raw.target);
+  const available = raw.available === true && durationIsValid && timeIsValid && targetIsValid;
+  const duration = durationIsValid ? raw.duration as number : 0;
+  const time = available ? clampTimelineTime(raw.time as number, duration) : 0;
+  const sampledAtUnixMs = typeof raw.sampledAtUnixMs === "number" && Number.isFinite(raw.sampledAtUnixMs) && raw.sampledAtUnixMs >= 0
+    ? raw.sampledAtUnixMs
+    : undefined;
+  return {
+    available,
+    time,
+    duration: available ? duration : 0,
+    playing: available && raw.playing === true,
+    looping: available && raw.looping === true,
+    target: available && isPlaybackTarget(raw.target) ? raw.target : null,
+    ...(sampledAtUnixMs === undefined ? {} : { sampledAtUnixMs }),
+  };
+}
+
+function samePlaybackSnapshot(left: TimelinePlaybackSnapshot, right: TimelinePlaybackSnapshot): boolean {
+  return left.available === right.available &&
+    left.time === right.time &&
+    left.duration === right.duration &&
+    left.playing === right.playing &&
+    left.looping === right.looping &&
+    left.target?.instanceId === right.target?.instanceId &&
+    left.target?.clipIndex === right.target?.clipIndex &&
+    left.sampledAtUnixMs === right.sampledAtUnixMs;
+}
+
 function roundedRect(
   context: CanvasRenderingContext2D,
   x: number,
@@ -266,10 +314,35 @@ export function TimelineEditor({
     useCallback(() => dataSource.getRevision(), [dataSource]),
     useCallback(() => dataSource.getRevision(), [dataSource]),
   );
+  const playbackSnapshotCacheRef = useRef<{
+    source: unknown;
+    snapshot: TimelinePlaybackSnapshot;
+  }>({ source: EMPTY_PLAYBACK, snapshot: EMPTY_PLAYBACK });
+  const readPlaybackSnapshot = useCallback(() => {
+    let source: unknown = EMPTY_PLAYBACK;
+    try {
+      source = playbackController?.getSnapshot() ?? EMPTY_PLAYBACK;
+    } catch {
+      source = EMPTY_PLAYBACK;
+    }
+    if (source === playbackSnapshotCacheRef.current.source) return playbackSnapshotCacheRef.current.snapshot;
+    let snapshot: TimelinePlaybackSnapshot;
+    try {
+      snapshot = normalizePlaybackSnapshot(source);
+    } catch {
+      snapshot = EMPTY_PLAYBACK;
+    }
+    if (samePlaybackSnapshot(playbackSnapshotCacheRef.current.snapshot, snapshot)) {
+      playbackSnapshotCacheRef.current = { source, snapshot: playbackSnapshotCacheRef.current.snapshot };
+      return playbackSnapshotCacheRef.current.snapshot;
+    }
+    playbackSnapshotCacheRef.current = { source, snapshot };
+    return snapshot;
+  }, [playbackController]);
   const playbackSnapshot = useSyncExternalStore(
     useCallback((listener) => playbackController?.subscribe(listener) ?? (() => undefined), [playbackController]),
-    useCallback(() => playbackController?.getSnapshot() ?? EMPTY_PLAYBACK, [playbackController]),
-    useCallback(() => playbackController?.getSnapshot() ?? EMPTY_PLAYBACK, [playbackController]),
+    readPlaybackSnapshot,
+    readPlaybackSnapshot,
   );
   const range = useMemo(() => safeRange(dataSource), [dataSource, revision]);
   const duration = Math.max(0, range.end - range.start);
@@ -278,6 +351,7 @@ export function TimelineEditor({
   const pixelsPerSecond = pixelsPerSecondFromZoom(zoomPercent);
   const [scroll, setScroll] = useState({ left: 0, top: 0 });
   const [viewport, setViewport] = useState<CanvasViewport>({ width: 0, height: 0 });
+  const [devicePixelRatio, setDevicePixelRatio] = useState(safeDevicePixelRatio);
   const [localTime, setLocalTime] = useState(range.start);
   const [scrubbing, setScrubbing] = useState(false);
   const scrubOriginRef = useRef(range.start);
@@ -310,6 +384,19 @@ export function TimelineEditor({
     const observer = new ResizeObserver(update);
     observer.observe(element);
     return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const update = () => setDevicePixelRatio(safeDevicePixelRatio());
+    window.addEventListener("resize", update);
+    const media = typeof window.matchMedia === "function"
+      ? window.matchMedia(`(resolution: ${safeDevicePixelRatio()}dppx)`)
+      : undefined;
+    media?.addEventListener?.("change", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      media?.removeEventListener?.("change", update);
+    };
   }, []);
 
   const time = playbackController && playbackSnapshot.available ? playbackSnapshot.time : localTime;
@@ -377,8 +464,7 @@ export function TimelineEditor({
     );
     scrubPreviewRef.current = next;
     updatePlayhead(next);
-    if (playbackController && playbackSnapshot.available) dispatchSafely(playbackController, { type: "seek", time: next, target: commandTarget }, onDiagnostic);
-  }, [commandTarget, fps, onDiagnostic, pixelsPerSecond, playbackController, playbackSnapshot.available, range.end, range.start, updatePlayhead]);
+  }, [fps, pixelsPerSecond, range.end, range.start, updatePlayhead]);
 
   const onPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -403,6 +489,8 @@ export function TimelineEditor({
       updatePlayhead(origin);
       if (playbackController && playbackSnapshot.available) dispatchSafely(playbackController, { type: "seek", time: origin, target: commandTarget }, onDiagnostic);
       else setLocalTime(origin);
+    } else if (playbackController && playbackSnapshot.available) {
+      dispatchSafely(playbackController, { type: "seek", time: scrubPreviewRef.current, target: commandTarget }, onDiagnostic);
     } else if (!playbackController) {
       setLocalTime(scrubPreviewRef.current);
     }
@@ -431,7 +519,7 @@ export function TimelineEditor({
     const canvas = canvasRef.current;
     if (!canvas || viewport.width <= 0 || viewport.height <= 0) return;
     const startedAt = performance.now();
-    const dpr = typeof window === "undefined" ? 1 : Math.max(1, window.devicePixelRatio || 1);
+    const dpr = devicePixelRatio;
     canvas.width = Math.max(1, Math.round(viewport.width * dpr));
     canvas.height = Math.max(1, Math.round(viewport.height * dpr));
     canvas.style.width = `${viewport.width}px`;
@@ -497,7 +585,7 @@ export function TimelineEditor({
       keysPainted: columns.length > 0 ? columns.length : keys.length,
       devicePixelRatio: dpr,
     });
-  }, [dataSource, pixelsPerSecond, range.end, range.start, revision, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
+  }, [dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
 
   const ticks = visibleTimelineTicks(
     range.end - range.start,
