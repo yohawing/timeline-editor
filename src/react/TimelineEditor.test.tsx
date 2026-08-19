@@ -107,6 +107,24 @@ describe("TimelineEditor transport and interaction boundary", () => {
     expect(playback.dispatch).toHaveBeenCalledWith({ type: "play", target });
   });
 
+  it("cycles the playback rate and shows 1x when the controller omits rate", () => {
+    const playback = controller();
+    render(<TimelineEditor dataSource={source()} playbackController={playback} />);
+    const rateButton = screen.getByRole("button", { name: "Playback rate" });
+    expect(rateButton.textContent).toBe("1x");
+    fireEvent.click(rateButton);
+    expect(playback.dispatch).toHaveBeenCalledWith({ type: "setRate", rate: 2, target });
+  });
+
+  it("displays the controller-reported rate and continues the cycle from it", () => {
+    const playback = controller({ rate: 2 });
+    render(<TimelineEditor dataSource={source()} playbackController={playback} />);
+    const rateButton = screen.getByRole("button", { name: "Playback rate" });
+    expect(rateButton.textContent).toBe("2x");
+    fireEvent.click(rateButton);
+    expect(playback.dispatch).toHaveBeenCalledWith({ type: "setRate", rate: 0.25, target });
+  });
+
   it("restores scrub origin on pointercancel and dispatches the origin seek", () => {
     const playback = controller();
     render(<TimelineEditor dataSource={source()} playbackController={playback} />);
