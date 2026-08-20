@@ -105,3 +105,43 @@ test("stress mode queries only a bounded virtualized page", async ({ page }) => 
   expect(summary?.rowsPainted).toBeLessThanOrEqual(80);
   expect(summary?.keysPainted).toBeLessThan(20_000);
 });
+
+/**
+ * The px -> rem conversion (timeline.css) must not move the default (16px
+ * root font-size) rendering by even 1px. These are the pixel values that
+ * were literal px in the stylesheet before the conversion.
+ */
+test("keeps default (16px root) computed sizes pixel-identical after the rem conversion", async ({ page }) => {
+  await page.goto("/");
+  const px = (selector: string, prop: string) =>
+    page.locator(selector).first().evaluate(
+      (element, cssProp) => Number.parseFloat(getComputedStyle(element)[cssProp as never] as string),
+      prop,
+    );
+  await expect.poll(() => px(".timeline-editor__tabs", "height")).toBe(20);
+  await expect.poll(() => px(".timeline-editor__toolbar", "height")).toBe(24);
+  await expect.poll(() => px(".timeline-editor__button", "width")).toBe(22);
+  await expect.poll(() => px(".timeline-editor__row", "height")).toBe(26);
+  await expect.poll(() => px(".timeline-editor__row-disclosure", "width")).toBe(12);
+  await expect.poll(() => px(".timeline-editor__tree-viewport", "width")).toBe(212);
+  await expect.poll(() => px(".timeline-editor__row-height-probe", "height")).toBe(26);
+});
+
+/**
+ * Simulates a host scaling its root font-size (this package's own consumer,
+ * yw-retarget-web's tauri_3dapp_template, does this via
+ * `document.documentElement.style.fontSize`). The DOM row strip's rendered
+ * height must track the scale, and the canvas-drawn row backdrop underneath
+ * the first row must land at the *same* pixel offset as that DOM row -
+ * proving TimelineEditor's row-height probe (not the TIMELINE_ROW_HEIGHT
+ * constant) is what drives canvas layout.
+ */
+test("keeps Canvas row painting aligned with the DOM row strip when root font-size scales", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(() => { document.documentElement.style.fontSize = "24px"; }); // 1.5x scale
+  const row = page.locator(".timeline-editor__row").first();
+  await expect.poll(() => row.evaluate((element) => Number.parseFloat(getComputedStyle(element).height))).toBe(39); // 26 * 1.5
+  await expect.poll(() =>
+    page.locator(".timeline-editor__row-height-probe").evaluate((element) => element.getBoundingClientRect().height),
+  ).toBe(39);
+});

@@ -207,8 +207,9 @@ function drawItem(
   item: TimelineItem,
   rowIndex: number,
   timeToX: (time: number) => number,
+  rowHeight: number,
 ): void {
-  const rowY = rowIndex * TIMELINE_ROW_HEIGHT;
+  const rowY = rowIndex * rowHeight;
   if (item.kind === "clip") {
     const x = timeToX(item.range.start);
     const width = Math.max(3, timeToX(item.range.end) - x);
@@ -268,9 +269,10 @@ function drawKey(
   key: TimelineKey,
   rowIndex: number,
   timeToX: (time: number) => number,
+  rowHeight: number,
 ): void {
   const x = timeToX(key.time);
-  const y = rowIndex * TIMELINE_ROW_HEIGHT + 19;
+  const y = rowIndex * rowHeight + 19;
   const radius = key.selected ? 4.5 : 3.5;
   context.beginPath();
   context.moveTo(x, y - radius);
@@ -290,6 +292,7 @@ function drawKeyColumn(
   column: TimelineKeyColumn,
   rowIndex: number,
   timeToX: (time: number) => number,
+  rowHeight: number,
 ): void {
   if (column.count <= 1) {
     drawKey(context, {
@@ -298,11 +301,11 @@ function drawKeyColumn(
       rowId: column.rowId,
       channelId: column.channelId,
       time: column.time,
-    }, rowIndex, timeToX);
+    }, rowIndex, timeToX, rowHeight);
     return;
   }
   const x = Math.round(timeToX(column.time)) + 0.5;
-  const y = rowIndex * TIMELINE_ROW_HEIGHT + 13;
+  const y = rowIndex * rowHeight + 13;
   context.strokeStyle = `rgba(230,232,255,${Math.min(1, .3 + Math.log2(column.count) / 8)})`;
   context.lineWidth = Math.min(4, 1 + Math.log2(column.count) / 3);
   context.beginPath();
@@ -395,7 +398,22 @@ export function TimelineEditor({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const playheadRef = useRef<HTMLDivElement>(null);
   const readoutRef = useRef<HTMLButtonElement>(null);
+  const rowHeightProbeRef = useRef<HTMLDivElement>(null);
   const [selectedTarget, setSelectedTarget] = useState<TimelinePlaybackTarget | null>(null);
+  const [measuredRowHeight, setMeasuredRowHeight] = useState(0);
+  /**
+   * `--timeline-row-height` is a rem value, so it tracks a host's root
+   * font-size (UI scale). Canvas drawing and the virtualized row transform
+   * below work in raw pixels, so they must follow the same *rendered* pixel
+   * height rather than the `TIMELINE_ROW_HEIGHT` constant, or rows painted on
+   * the canvas would drift out of alignment with the DOM row strip whenever
+   * the host scales its UI. `measuredRowHeight` reads that rendered height
+   * from an always-mounted, invisible probe box; it falls back to the
+   * constant (and stays 0 -> constant in jsdom, where ResizeObserver is
+   * stubbed and ResizeObserver never fires) so this has no effect outside a
+   * real browser layout.
+   */
+  const rowHeight = measuredRowHeight > 0 ? measuredRowHeight : TIMELINE_ROW_HEIGHT;
 
   useEffect(() => {
     setLocalTime((time) => clampTimelineTime(time, range.end));
@@ -404,6 +422,20 @@ export function TimelineEditor({
   useEffect(() => {
     setDisplayMode(initialDisplayMode);
   }, [initialDisplayMode]);
+
+  useEffect(() => {
+    const element = rowHeightProbeRef.current;
+    if (!element) return;
+    const update = () => setMeasuredRowHeight(element.getBoundingClientRect().height);
+    update();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", update);
+      return () => window.removeEventListener("resize", update);
+    }
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const element = timelineViewportRef.current;
@@ -436,12 +468,12 @@ export function TimelineEditor({
   const canTransport = Boolean(playbackController && playbackSnapshot.available);
   const rowCountValue = dataSource.getRowCount();
   const rowCount = Number.isFinite(rowCountValue) ? Math.max(0, Math.floor(rowCountValue)) : 0;
-  const rowQuery = visibleTimelineRowQuery(rowCount, scroll.top, viewport.height);
+  const rowQuery = visibleTimelineRowQuery(rowCount, scroll.top, viewport.height, rowHeight);
   const rows = useMemo(
     () => dataSource.getRows(rowQuery),
     [dataSource, revision, rowQuery.start, rowQuery.count],
   );
-  const totalHeight = rowCount * TIMELINE_ROW_HEIGHT;
+  const totalHeight = rowCount * rowHeight;
   const totalWidth = Math.max(viewport.width, duration * pixelsPerSecond);
   const visibleTimeRange = {
     start: Math.max(range.start, range.start + scroll.left / pixelsPerSecond),
@@ -584,13 +616,13 @@ export function TimelineEditor({
     for (let index = firstRow; index < lastRow; index += 1) {
       const row = rows[index - rowQuery.start];
       if (!row) continue;
-      const y = index * TIMELINE_ROW_HEIGHT;
+      const y = index * rowHeight;
       context.fillStyle = row.kind === "group" ? "#22242d" : index % 2 === 0 ? "#1c1e25" : "#191b21";
-      context.fillRect(scroll.left, y, viewport.width, TIMELINE_ROW_HEIGHT);
+      context.fillRect(scroll.left, y, viewport.width, rowHeight);
       context.strokeStyle = "rgba(255,255,255,.055)";
       context.beginPath();
-      context.moveTo(scroll.left, y + TIMELINE_ROW_HEIGHT - .5);
-      context.lineTo(scroll.left + viewport.width, y + TIMELINE_ROW_HEIGHT - .5);
+      context.moveTo(scroll.left, y + rowHeight - .5);
+      context.lineTo(scroll.left + viewport.width, y + rowHeight - .5);
       context.stroke();
     }
     const gridStep = pixelsPerSecond >= 40 ? .5 : pixelsPerSecond >= 15 ? 1 : 5;
@@ -611,17 +643,17 @@ export function TimelineEditor({
     const clippedRows = new Set(rowIds);
     for (const item of items) {
       const rowIndex = rowIndexById.get(item.rowId);
-      if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, item, rowIndex, transform.timeToX);
+      if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, item, rowIndex, transform.timeToX, rowHeight);
     }
     if (columns.length > 0) {
       for (const column of columns) {
         const rowIndex = rowIndexById.get(column.rowId);
-        if (rowIndex != null) drawKeyColumn(context, column, rowIndex, transform.timeToX);
+        if (rowIndex != null) drawKeyColumn(context, column, rowIndex, transform.timeToX, rowHeight);
       }
     } else {
       for (const key of keys) {
         const rowIndex = rowIndexById.get(key.rowId);
-        if (rowIndex != null) drawKey(context, key, rowIndex, transform.timeToX);
+        if (rowIndex != null) drawKey(context, key, rowIndex, transform.timeToX, rowHeight);
       }
     }
     context.restore();
@@ -633,7 +665,7 @@ export function TimelineEditor({
       keysPainted: columns.length > 0 ? columns.length : keys.length,
       devicePixelRatio: dpr,
     });
-  }, [dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
+  }, [dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
 
   const ticks = visibleTimelineTicks(
     range.end - range.start,
@@ -660,6 +692,7 @@ export function TimelineEditor({
 
   return (
     <section className={rootClassName} aria-label="Timeline editor">
+      <div ref={rowHeightProbeRef} className="timeline-editor__row-height-probe" aria-hidden="true" />
       <header className="timeline-editor__header">
         {showTitle && (
           <div className="timeline-editor__tabs">
@@ -710,7 +743,7 @@ export function TimelineEditor({
           <div className="timeline-editor__tree-content" style={{ height: totalHeight }}>
             {rows.map((row, index) => {
               const target = rowTargets.get(row.id);
-              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} />;
+              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} rowHeight={rowHeight} />;
             })}
             {rowCount === 0 && <div className="timeline-editor__empty">{slots?.emptyState ?? "No timeline tracks"}</div>}
           </div>
@@ -741,12 +774,14 @@ function TimelineRowView({
   target,
   selected,
   onSelect,
+  rowHeight,
 }: {
   row: TimelineRow;
   index: number;
   target?: TimelinePlaybackTarget;
   selected: boolean;
   onSelect: (target: TimelinePlaybackTarget) => void;
+  rowHeight: number;
 }): ReactElement {
   const targetProps = target ? {
     role: "button" as const,
@@ -762,10 +797,10 @@ function TimelineRowView({
     },
   } : {};
   return (
-    <div className={`timeline-editor__row timeline-editor__row--${row.kind}${target ? " timeline-editor__row--target" : ""}${selected ? " is-target-selected" : ""}`} style={{ transform: `translateY(${index * TIMELINE_ROW_HEIGHT}px)` }} {...targetProps}>
+    <div className={`timeline-editor__row timeline-editor__row--${row.kind}${target ? " timeline-editor__row--target" : ""}${selected ? " is-target-selected" : ""}`} style={{ transform: `translateY(${index * rowHeight}px)` }} {...targetProps}>
       <span className="timeline-editor__row-color" style={{ backgroundColor: row.color ?? "#6c7284" }} />
       <span className="timeline-editor__row-disclosure">{row.kind === "group" ? "▾" : ""}</span>
-      <span className="timeline-editor__row-label" style={{ paddingLeft: `${Math.max(0, row.depth) * 10}px` }}>{row.label}</span>
+      <span className="timeline-editor__row-label" style={{ paddingLeft: `${Math.max(0, row.depth) * 10 * (rowHeight / TIMELINE_ROW_HEIGHT)}px` }}>{row.label}</span>
       {row.bindingId && <span className="timeline-editor__row-binding">{String(row.bindingId).replace(/^binding-/, "")}</span>}
       {row.muted && <span className="timeline-editor__row-state">M</span>}
       {row.locked && <span className="timeline-editor__row-state">L</span>}
