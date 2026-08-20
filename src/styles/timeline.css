@@ -84,7 +84,8 @@
   font: inherit;
 }
 
-.timeline-editor__button { width: 22px; padding: 0; }
+.timeline-editor__button { width: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.timeline-editor__button svg { width: 14px; height: 14px; }
 .timeline-editor__button--rate { width: auto; min-width: 26px; padding: 0 4px; font-family: var(--timeline-mono); font-size: 9px; font-variant-numeric: tabular-nums; }
 .timeline-editor__button:hover:not(:disabled),
 .timeline-editor__readout:hover { color: #fff; background: rgba(255,255,255,.08); }

@@ -71,8 +71,40 @@ describe("TimelineEditor transport and interaction boundary", () => {
   it("keeps transport disabled without a controller", () => {
     render(<TimelineEditor dataSource={source()} />);
     expect((screen.getByRole("button", { name: "Play" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Pause" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Loop" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+  });
+
+  it("toggles a single play/pause button based on the controller's playing state", () => {
+    const playback = controller({ playing: true });
+    render(<TimelineEditor dataSource={source()} playbackController={playback} />);
+    expect(screen.queryByRole("button", { name: "Play" })).toBeNull();
+    const pauseButton = screen.getByRole("button", { name: "Pause" });
+    fireEvent.click(pauseButton);
+    expect(playback.dispatch).toHaveBeenCalledWith({ type: "pause", target });
+  });
+
+  it("steps one frame forward and backward honoring the frame rate", () => {
+    const playback = controller();
+    render(<TimelineEditor dataSource={source()} playbackController={playback} frameRate={24} />);
+    fireEvent.click(screen.getByRole("button", { name: "Next frame" }));
+    expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 25 / 24, target });
+    fireEvent.click(screen.getByRole("button", { name: "Previous frame" }));
+    expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 23 / 24, target });
+  });
+
+  it("skips to the start and end of the timeline range", () => {
+    const playback = controller();
+    render(<TimelineEditor dataSource={source()} playbackController={playback} />);
+    fireEvent.click(screen.getByRole("button", { name: "Skip to start" }));
+    expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 0, target });
+    fireEvent.click(screen.getByRole("button", { name: "Skip to end" }));
+    expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 10, target });
+  });
+
+  it("hides the built-in title strip when showTitle is false", () => {
+    render(<TimelineEditor dataSource={source()} showTitle={false} />);
+    expect(screen.queryByText("Timeline")).toBeNull();
   });
 
   it("disables transport and sanitizes malformed host playback state", () => {
@@ -92,6 +124,7 @@ describe("TimelineEditor transport and interaction boundary", () => {
     };
     render(<TimelineEditor dataSource={source()} playbackController={playback} />);
     expect((screen.getByRole("button", { name: "Play" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
     expect(document.body.innerHTML).not.toContain("NaN");
     expect(document.body.innerHTML).not.toContain("Infinity");
   });

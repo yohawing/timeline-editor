@@ -40,6 +40,15 @@ import {
   type TimelinePlaybackTarget,
 } from "../core/playback";
 import "../styles/timeline.css";
+import {
+  NavigateBeforeIcon,
+  NavigateNextIcon,
+  PauseIcon,
+  PlayIcon,
+  RepeatIcon,
+  SkipNextIcon,
+  SkipPreviousIcon,
+} from "./icons";
 
 export interface TimelineDiagnostic {
   level: "info" | "warning" | "error";
@@ -70,6 +79,12 @@ export interface TimelineEditorProps {
   frameRate?: number;
   displayMode?: "frames" | "seconds";
   variant?: "compact" | "full";
+  /**
+   * Whether TimelineEditor renders its own "Timeline" title strip. Defaults to
+   * true (current behavior). Set false when a host already provides an
+   * equivalent tab/heading (e.g. a docking layout) to avoid a duplicate title.
+   */
+  showTitle?: boolean;
   className?: string;
   onDiagnostic?: (diagnostic: TimelineDiagnostic) => void;
   onPerformanceSummary?: (summary: TimelinePerformanceSummary) => void;
@@ -320,6 +335,7 @@ export function TimelineEditor({
   frameRate = 24,
   displayMode: initialDisplayMode = "frames",
   variant = "full",
+  showTitle = true,
   className,
   onDiagnostic,
   onPerformanceSummary,
@@ -516,6 +532,21 @@ export function TimelineEditor({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, updatePlayhead]);
 
+  /** Seek transport (skip-to-start/end, frame step) shares scrub's dispatch-or-local-set split. */
+  const seekTo = useCallback((nextTime: number) => {
+    const clamped = resolveTimelineSeekTime(nextTime, range.end, "unsnapped", fps);
+    if (playbackController && playbackSnapshot.available) {
+      dispatchSafely(playbackController, { type: "seek", time: clamped, target: commandTarget }, onDiagnostic);
+    } else if (!playbackController) {
+      setLocalTime(clamped);
+    }
+  }, [commandTarget, fps, onDiagnostic, playbackController, playbackSnapshot.available, range.end]);
+
+  const stepFrame = useCallback((direction: -1 | 1) => {
+    const stepped = resolveTimelineSeekTime(time + direction / fps, range.end, "frame-snap", fps);
+    seekTo(stepped);
+  }, [fps, range.end, seekTo, time]);
+
   const onScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const element = event.currentTarget;
     setScroll({ left: element.scrollLeft, top: element.scrollTop });
@@ -630,15 +661,28 @@ export function TimelineEditor({
   return (
     <section className={rootClassName} aria-label="Timeline editor">
       <header className="timeline-editor__header">
-        <div className="timeline-editor__tabs">
-          <span className="timeline-editor__tab timeline-editor__tab--active">Timeline</span>
-        </div>
+        {showTitle && (
+          <div className="timeline-editor__tabs">
+            <span className="timeline-editor__tab timeline-editor__tab--active">Timeline</span>
+          </div>
+        )}
         <div className="timeline-editor__toolbar">
           <div className="timeline-editor__slot">{slots?.toolbarStart}</div>
           <div className="timeline-editor__transport" role="group" aria-label="Playback controls">
-            <button type="button" className="timeline-editor__button" disabled={!canTransport} aria-label="Play" onClick={() => dispatchTransport({ type: "play" })}>▶</button>
-            <button type="button" className="timeline-editor__button" disabled={!canTransport} aria-label="Pause" onClick={() => dispatchTransport({ type: "pause" })}>▮▮</button>
-            <button type="button" className={`timeline-editor__button${playbackSnapshot.looping ? " is-active" : ""}`} disabled={!canTransport} aria-label="Loop" onClick={() => dispatchTransport({ type: "setLooping", looping: !playbackSnapshot.looping })}>↻</button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} aria-label="Skip to start" onClick={() => seekTo(range.start)}><SkipPreviousIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} aria-label="Previous frame" onClick={() => stepFrame(-1)}><NavigateBeforeIcon /></button>
+            <button
+              type="button"
+              className="timeline-editor__button"
+              disabled={!canTransport}
+              aria-label={playbackSnapshot.playing ? "Pause" : "Play"}
+              onClick={() => dispatchTransport(playbackSnapshot.playing ? { type: "pause" } : { type: "play" })}
+            >
+              {playbackSnapshot.playing ? <PauseIcon /> : <PlayIcon />}
+            </button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} aria-label="Next frame" onClick={() => stepFrame(1)}><NavigateNextIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} aria-label="Skip to end" onClick={() => seekTo(range.end)}><SkipNextIcon /></button>
+            <button type="button" className={`timeline-editor__button${playbackSnapshot.looping ? " is-active" : ""}`} disabled={!canTransport} aria-label="Loop" onClick={() => dispatchTransport({ type: "setLooping", looping: !playbackSnapshot.looping })}><RepeatIcon /></button>
             <button
               type="button"
               className={`timeline-editor__button timeline-editor__button--rate${playbackRate !== 1 ? " is-active" : ""}`}

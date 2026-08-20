@@ -68,9 +68,27 @@ test("scrub pointer capture and cancel restore the origin", async ({ page }) => 
 test("disables transport and keeps finite layout for malformed host playback", async ({ page }) => {
   await page.goto("/?malformed=1");
   await expect(page.getByRole("button", { name: "Play", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toHaveCount(0);
   await expect(page.locator(".timeline-editor")).not.toContainText("NaN");
   await expect(page.locator(".timeline-editor")).not.toContainText("Infinity");
+});
+
+test("toggles a single play/pause button and steps frames and range bounds", async ({ page }) => {
+  await page.goto("/?fps=24");
+  const toggle = page.getByRole("button", { name: "Play", exact: true });
+  const readout = page.getByRole("button", { name: "Toggle time display" });
+  await expect(readout).toContainText("0000");
+  await page.getByRole("button", { name: "Next frame" }).click();
+  await expect(readout).toContainText("0001");
+  await page.getByRole("button", { name: "Previous frame" }).click();
+  await expect(readout).toContainText("0000");
+  await page.getByRole("button", { name: "Skip to end" }).click();
+  await expect(readout).toContainText("0288");
+  await page.getByRole("button", { name: "Skip to start" }).click();
+  await expect(readout).toContainText("0000");
+  await toggle.click();
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Play", exact: true })).toHaveCount(0);
 });
 
 test("reports an asynchronous transport rejection", async ({ page }) => {
