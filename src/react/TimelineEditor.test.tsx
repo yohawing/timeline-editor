@@ -203,6 +203,90 @@ describe("TimelineEditor transport and interaction boundary", () => {
     expect(playback.dispatch).not.toHaveBeenCalled();
   });
 
+  it("steps the playhead with ArrowLeft/ArrowRight when the track viewport has focus", () => {
+    const playback = controller();
+    render(<TimelineEditor dataSource={source()} playbackController={playback} frameRate={24} />);
+    const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
+    fireEvent.keyDown(viewport, { key: "ArrowRight" });
+    expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 25 / 24, target });
+    fireEvent.keyDown(viewport, { key: "ArrowLeft" });
+    expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 23 / 24, target });
+  });
+
+  it("does not steal ArrowLeft/ArrowRight from an unrelated input", () => {
+    const playback = controller();
+    render(<TimelineEditor dataSource={source()} playbackController={playback} frameRate={24} />);
+    const zoom = screen.getByRole("slider", { name: "Timeline zoom" });
+    fireEvent.keyDown(zoom, { key: "ArrowRight" });
+    expect(playback.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "seek" }));
+  });
+
+  it("scrubs by dragging on the frame-number ruler and snaps to an integer frame", () => {
+    const playback = controller();
+    render(<TimelineEditor dataSource={source()} playbackController={playback} frameRate={24} />);
+    const ruler = document.querySelector(".timeline-editor__ruler") as HTMLDivElement;
+    const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
+    Object.defineProperty(viewport, "getBoundingClientRect", { value: () => ({ left: 0, top: 0, width: 300, height: 100 }) });
+    const pointerDown = new Event("pointerdown", { bubbles: true });
+    Object.assign(pointerDown, { button: 0, pointerId: 5, clientX: 40 });
+    fireEvent(ruler, pointerDown);
+    const pointerUp = new Event("pointerup", { bubbles: true });
+    Object.assign(pointerUp, { pointerId: 5, clientX: 40 });
+    fireEvent(ruler, pointerUp);
+    expect(playback.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "seek", target }));
+    const call = playback.dispatch.mock.calls.find(([command]) => command.type === "seek");
+    const seekedTime = call?.[0].time as number;
+    // Snapped to an exact integer frame at 24fps.
+    expect(Number.isInteger(seekedTime * 24)).toBe(true);
+  });
+
+  it("sets a loop range by dragging the loop lane", () => {
+    const playback = controller();
+    render(<TimelineEditor dataSource={source()} playbackController={playback} />);
+    const lane = document.querySelector(".timeline-editor__loop-lane") as HTMLDivElement;
+    const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
+    Object.defineProperty(viewport, "getBoundingClientRect", { value: () => ({ left: 0, top: 0, width: 300, height: 100 }) });
+    const pointerDown = new Event("pointerdown", { bubbles: true });
+    Object.assign(pointerDown, { button: 0, pointerId: 7, clientX: 40 });
+    fireEvent(lane, pointerDown);
+    const pointerMove = new Event("pointermove", { bubbles: true });
+    Object.assign(pointerMove, { pointerId: 7, clientX: 120 });
+    fireEvent(lane, pointerMove);
+    const pointerUp = new Event("pointerup", { bubbles: true });
+    Object.assign(pointerUp, { pointerId: 7, clientX: 120 });
+    fireEvent(lane, pointerUp);
+    expect(playback.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "setLoopRange", target }));
+    const setCall = playback.dispatch.mock.calls.find(([command]) => command.type === "setLoopRange");
+    const range = setCall?.[0].range as { start: number; end: number } | null;
+    expect(range).not.toBeNull();
+    expect(range!.end).toBeGreaterThan(range!.start);
+  });
+
+  it("renders the loop range clear control when the controller reports one, and clears it", () => {
+    const playback = controller({ loopRange: { start: 2, end: 6 } });
+    render(<TimelineEditor dataSource={source()} playbackController={playback} />);
+    const clearButton = screen.getByRole("button", { name: "Clear loop range" });
+    fireEvent.click(clearButton);
+    expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "setLoopRange", range: null, target });
+  });
+
+  it("sets a loop range locally (no dispatch) when there is no playback controller", () => {
+    render(<TimelineEditor dataSource={source()} />);
+    const lane = document.querySelector(".timeline-editor__loop-lane") as HTMLDivElement;
+    const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
+    Object.defineProperty(viewport, "getBoundingClientRect", { value: () => ({ left: 0, top: 0, width: 300, height: 100 }) });
+    const pointerDown = new Event("pointerdown", { bubbles: true });
+    Object.assign(pointerDown, { button: 0, pointerId: 9, clientX: 40 });
+    fireEvent(lane, pointerDown);
+    const pointerMove = new Event("pointermove", { bubbles: true });
+    Object.assign(pointerMove, { pointerId: 9, clientX: 120 });
+    fireEvent(lane, pointerMove);
+    const pointerUp = new Event("pointerup", { bubbles: true });
+    Object.assign(pointerUp, { pointerId: 9, clientX: 120 });
+    fireEvent(lane, pointerUp);
+    expect(screen.getByRole("button", { name: "Clear loop range" })).toBeTruthy();
+  });
+
   it("reports rejected async commands and follows display props", async () => {
     const playback = controller();
     playback.dispatch.mockRejectedValue(new Error("transport down"));

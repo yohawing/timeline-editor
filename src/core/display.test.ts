@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  clampTimelineLoopRange,
   clampTimelineTime,
   formatCompactTimelineReadout,
   formatTimelineReadout,
@@ -34,5 +35,18 @@ describe("timeline display policies", () => {
     expect(ticks[0]).toBe(18);
     expect(ticks[ticks.length - 1]).toBe(37);
     expect(ticks.length).toBeLessThanOrEqual(512);
+  });
+
+  it("clamps a loop range to [0, duration]", () => {
+    expect(clampTimelineLoopRange({ start: -1, end: 20 }, 10)).toEqual({ start: 0, end: 10 });
+    expect(clampTimelineLoopRange({ start: 2, end: 5 }, 10)).toEqual({ start: 2, end: 5 });
+  });
+
+  it("normalizes a degenerate or malformed loop range to null", () => {
+    expect(clampTimelineLoopRange(null, 10)).toBeNull();
+    expect(clampTimelineLoopRange(undefined, 10)).toBeNull();
+    expect(clampTimelineLoopRange({ start: 5, end: 5 }, 10)).toBeNull();
+    expect(clampTimelineLoopRange({ start: 8, end: 3 }, 10)).toBeNull();
+    expect(clampTimelineLoopRange({ start: Number.NaN, end: 5 }, 10)).toEqual({ start: 0, end: 5 });
   });
 });

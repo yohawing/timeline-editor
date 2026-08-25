@@ -76,4 +76,53 @@ describe("transport-neutral playback controller", () => {
     expect(projectTimelinePlaybackTime({ ...base, rate: 0.5 }, 1_000)).toBe(0.5);
     expect(projectTimelinePlaybackTime(base, 1_000)).toBe(1);
   });
+
+  it("sets and clamps a loop range via dispatch", () => {
+    const controller = createLocalPlaybackController(10);
+    const target = { instanceId: "fixture", clipIndex: 0 };
+    controller.dispatch({ type: "setLoopRange", range: { start: 2, end: 6 }, target });
+    expect(controller.getSnapshot().loopRange).toEqual({ start: 2, end: 6 });
+    controller.dispatch({ type: "setLoopRange", range: { start: -5, end: 99 }, target });
+    expect(controller.getSnapshot().loopRange).toEqual({ start: 0, end: 10 });
+    controller.dispatch({ type: "setLoopRange", range: { start: 5, end: 5 }, target });
+    expect(controller.getSnapshot().loopRange).toBeNull();
+    controller.dispatch({ type: "setLoopRange", range: { start: 2, end: 6 }, target });
+    controller.dispatch({ type: "setLoopRange", range: null, target });
+    expect(controller.getSnapshot().loopRange).toBeNull();
+  });
+
+  it("wraps playback within the loop range instead of the full duration", () => {
+    vi.useFakeTimers();
+    try {
+      const controller = createLocalPlaybackController(10, 5);
+      const target = { instanceId: "fixture", clipIndex: 0 };
+      controller.dispatch({ type: "setLoopRange", range: { start: 2, end: 6 }, target });
+      controller.dispatch({ type: "setLooping", looping: true, target });
+      controller.dispatch({ type: "play", target });
+      // Advance past the loop-range end (6s) but well short of the full duration (10s).
+      vi.advanceTimersByTime(1_500);
+      const snapshot = controller.getSnapshot();
+      expect(snapshot.playing).toBe(true);
+      expect(snapshot.time).toBeGreaterThanOrEqual(2);
+      expect(snapshot.time).toBeLessThan(6);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("projects playing time wrapped within a loop range", () => {
+    const target = { instanceId: "fixture", clipIndex: 0 };
+    const snapshot = {
+      available: true,
+      time: 5,
+      duration: 10,
+      playing: true,
+      looping: true,
+      loopRange: { start: 2, end: 6 },
+      target,
+      sampledAtUnixMs: 0,
+    } as const;
+    // 5 + 2.5s = 7.5, which is 1.5s past loopEnd (6); wraps to loopStart (2) + 1.5 = 3.5.
+    expect(projectTimelinePlaybackTime(snapshot, 2_500)).toBe(3.5);
+  });
 });

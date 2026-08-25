@@ -110,6 +110,12 @@ test("stress mode queries only a bounded virtualized page", async ({ page }) => 
  * The px -> rem conversion (timeline.css) must not move the default (16px
  * root font-size) rendering by even 1px. These are the pixel values that
  * were literal px in the stylesheet before the conversion.
+ *
+ * The header's title tab moved inline into the single-row toolbar (it used
+ * to stack in its own 20px row above a 24px toolbar row, making the whole
+ * control bar an unnaturally tall 44px) so `.timeline-editor__tabs` is now
+ * the same 24px height as the toolbar it sits inside, and the header is a
+ * single natural row.
  */
 test("keeps default (16px root) computed sizes pixel-identical after the rem conversion", async ({ page }) => {
   await page.goto("/");
@@ -118,7 +124,8 @@ test("keeps default (16px root) computed sizes pixel-identical after the rem con
       (element, cssProp) => Number.parseFloat(getComputedStyle(element)[cssProp as never] as string),
       prop,
     );
-  await expect.poll(() => px(".timeline-editor__tabs", "height")).toBe(20);
+  await expect.poll(() => px(".timeline-editor__header", "height")).toBe(24);
+  await expect.poll(() => px(".timeline-editor__tabs", "height")).toBe(24);
   await expect.poll(() => px(".timeline-editor__toolbar", "height")).toBe(24);
   await expect.poll(() => px(".timeline-editor__button", "width")).toBe(22);
   await expect.poll(() => px(".timeline-editor__row", "height")).toBe(26);

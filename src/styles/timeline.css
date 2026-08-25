@@ -17,12 +17,18 @@
   --timeline-control-height: 1.25rem; /* 20px */
   --timeline-row-height: 1.625rem; /* 26px */
   --timeline-tree-width: 13.25rem; /* 212px */
-  --timeline-tabs-height: 1.25rem; /* 20px */
+  /* The title tab now lives inline inside the single-row toolbar (see
+     .timeline-editor__header) rather than stacking above it as its own
+     row, so the header is one natural control-bar height instead of two
+     stacked strips. --timeline-tabs-height is kept only as the tab's own
+     inline height (matches the toolbar height it sits inside). */
+  --timeline-tabs-height: 1.5rem; /* 24px */
   --timeline-toolbar-height: 1.5rem; /* 24px */
+  --timeline-ruler-height: 1.5rem; /* 24px: tick labels + the loop-range lane */
   --timeline-font: Inter, "Segoe UI", sans-serif;
   --timeline-mono: "JetBrains Mono", Consolas, monospace;
   display: grid;
-  grid-template-rows: calc(var(--timeline-tabs-height) + var(--timeline-toolbar-height)) minmax(0, 1fr);
+  grid-template-rows: var(--timeline-toolbar-height) minmax(0, 1fr);
   min-width: 320px;
   min-height: 180px;
   overflow: hidden;
@@ -54,16 +60,22 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
+  height: var(--timeline-toolbar-height);
   background: var(--timeline-surface-2);
   border-bottom: 1px solid var(--timeline-divider);
 }
 
+/*
+ * The title tab sits inline as the first item of the single-row toolbar
+ * (rather than stacked above it in its own row) so the whole control bar
+ * stays one natural row tall instead of two stacked strips.
+ */
 .timeline-editor__tabs {
   display: flex;
-  height: var(--timeline-tabs-height);
-  flex: 0 0 var(--timeline-tabs-height);
+  height: 100%;
+  flex: 0 0 auto;
   background: var(--timeline-surface-0);
-  border-bottom: 1px solid var(--timeline-divider);
+  border-right: 1px solid var(--timeline-divider);
 }
 
 .timeline-editor__tab {
@@ -122,7 +134,10 @@
 .timeline-editor__body {
   display: grid;
   grid-template-columns: var(--timeline-tree-width) minmax(0, 1fr);
-  grid-template-rows: 1.125rem minmax(0, 1fr); /* 18px */
+  grid-template-rows: var(--timeline-ruler-height) minmax(0, 1fr);
+  grid-template-areas:
+    "tree-heading  ruler-tracks"
+    "tree-viewport ruler-tracks";
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -130,15 +145,12 @@
   background: var(--timeline-surface-1);
 }
 
-.timeline-editor__tree-heading,
-.timeline-editor__ruler {
+.timeline-editor__tree-heading {
+  grid-area: tree-heading;
   min-width: 0;
   overflow: hidden;
   background: var(--timeline-surface-2);
   border-bottom: 1px solid var(--timeline-divider);
-}
-
-.timeline-editor__tree-heading {
   display: flex;
   align-items: center;
   padding: 0 0.5rem; /* 8px */
@@ -148,9 +160,49 @@
   letter-spacing: .08em;
 }
 
-.timeline-editor__ruler { position: relative; user-select: none; }
-.timeline-editor__tick { position: absolute; top: 0.1875rem; color: var(--timeline-text-dim); font-family: var(--timeline-mono); font-size: 0.5rem; transform: translateX(-50%); white-space: nowrap; } /* 3px, 8px */
-.timeline-editor__tree-viewport { min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--timeline-divider); background: var(--timeline-surface-2); }
+/*
+ * Shared positioning context for the ruler and the scrollable track
+ * viewport below it. The playhead and loop-range band are single elements
+ * absolutely positioned against this wrapper (not the viewport alone), so
+ * they visually span both rows: the playhead line runs up through the
+ * ruler instead of stopping at its own row's edge.
+ */
+.timeline-editor__ruler-and-tracks {
+  grid-area: ruler-tracks;
+  position: relative;
+  display: grid;
+  grid-template-rows: var(--timeline-ruler-height) minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.timeline-editor__ruler {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--timeline-surface-2);
+  border-bottom: 1px solid var(--timeline-divider);
+  user-select: none;
+  touch-action: none;
+}
+.timeline-editor__tick { position: absolute; top: 0.1875rem; color: var(--timeline-text-dim); font-family: var(--timeline-mono); font-size: 0.5rem; transform: translateX(-50%); white-space: nowrap; pointer-events: none; } /* 3px, 8px */
+
+/* Dedicated drag lane for setting the loop in/out range, kept separate
+   from the rest of the ruler (which scrubs the playhead on drag). */
+.timeline-editor__loop-lane {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0.375rem; /* 6px */
+  background: rgba(255,255,255,.045);
+  cursor: crosshair;
+  touch-action: none;
+}
+.timeline-editor__loop-lane:hover { background: rgba(255,255,255,.1); }
+
+.timeline-editor__tree-viewport { grid-area: tree-viewport; min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--timeline-divider); background: var(--timeline-surface-2); }
 .timeline-editor__tree-content { position: relative; min-height: 0; }
 
 .timeline-editor__row {
@@ -186,22 +238,53 @@
   min-height: 0;
   overflow: auto;
   background: var(--timeline-surface-1);
-  cursor: ew-resize;
+  cursor: default;
   scrollbar-color: #3a3a44 transparent;
   touch-action: none;
   user-select: none;
 }
+.timeline-editor__viewport:focus-visible { outline: 1px solid #5a8fe0; outline-offset: -1px; }
+/* Feedback cursor while a scrub drag is in progress, on whichever surface
+   (ruler or track viewport) the pointer was pressed on. */
+.timeline-editor.is-scrubbing .timeline-editor__viewport,
+.timeline-editor.is-scrubbing .timeline-editor__ruler { cursor: ew-resize; }
 .timeline-editor__content { pointer-events: none; }
 .timeline-editor__canvas { position: absolute; top: 0; left: 0; display: block; pointer-events: none; }
-.timeline-editor__playhead { position: absolute; top: 0; bottom: 0; left: 0; z-index: 2; border-left: 1px solid #ff5d73; pointer-events: none; will-change: transform; }
+.timeline-editor__playhead { position: absolute; top: 0; bottom: 0; left: 0; z-index: 3; border-left: 1px solid #ff5d73; pointer-events: none; will-change: transform; }
 .timeline-editor__playhead::after { content: ""; position: absolute; top: 0; left: -0.25rem; width: 0.4375rem; height: 0.3125rem; border-radius: 0 0 0.1875rem 0.1875rem; background: #ff5d73; } /* -4px, 7px, 5px, 3px */
+.timeline-editor__loop-region {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  background: rgba(255, 196, 0, .14);
+  border-left: 1px solid rgba(255, 196, 0, .55);
+  border-right: 1px solid rgba(255, 196, 0, .55);
+  pointer-events: none;
+}
+.timeline-editor__loop-clear {
+  position: absolute;
+  top: 0.125rem; /* 2px */
+  right: 0.125rem;
+  width: 0.75rem; /* 12px */
+  height: 0.75rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(20,20,24,.75);
+  color: #ffe6a8;
+  font-size: 0.625rem; /* 10px */
+  line-height: 0.75rem;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.timeline-editor__loop-clear:hover { background: rgba(20,20,24,.95); }
 .timeline-editor__range-action { position: absolute; right: 0.5rem; bottom: 0.5rem; z-index: 3; pointer-events: auto; } /* 8px */
 .timeline-editor__empty { padding: 0.75rem 0.5rem; color: var(--timeline-text-dim); } /* 12px, 8px */
 .timeline-editor__viewport::-webkit-scrollbar { width: 0.5rem; height: 0.5rem; } /* 8px */
 .timeline-editor__viewport::-webkit-scrollbar-track { background: transparent; }
 .timeline-editor__viewport::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 0.25rem; background: #3a3a44; background-clip: content-box; } /* 4px */
 
-.timeline-editor--compact { grid-template-rows: calc(var(--timeline-tabs-height) + var(--timeline-toolbar-height)) minmax(0, 1fr); }
 .timeline-editor--compact .timeline-editor__tree-heading { font-size: 0.5rem; } /* 8px */
 .timeline-editor--compact .timeline-editor__row { font-size: 0.5rem; } /* 8px */
 .timeline-editor--compact .timeline-editor__row-binding,

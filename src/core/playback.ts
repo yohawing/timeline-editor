@@ -1,5 +1,5 @@
-import { clampTimelineTime } from "./display";
-import type { TimelinePlaybackTarget } from "./contracts";
+import { clampTimelineLoopRange, clampTimelineTime } from "./display";
+import type { TimeRange, TimelinePlaybackTarget } from "./contracts";
 
 export type { TimelinePlaybackTarget } from "./contracts";
 
@@ -15,6 +15,14 @@ export interface TimelinePlaybackSnapshot {
    * `rate` is treated as fixed at 1x. Consumers must not assume presence.
    */
   readonly rate?: number;
+  /**
+   * Optional in/out loop region, in canonical seconds. When `looping` is
+   * true and this is set, playback wraps within `[loopRange.start,
+   * loopRange.end)` instead of the full `[0, duration)` range. `null`/absent
+   * means "loop the full duration" — backward compatible with controllers
+   * that predate loop ranges.
+   */
+  readonly loopRange?: TimeRange | null;
   /** Runtime target represented by this snapshot, when available. */
   readonly target?: TimelinePlaybackTarget | null;
   /** Unix-ms sample time used for local projection while playing. */
@@ -30,7 +38,8 @@ export type TimelinePlaybackCommand =
   | ({ type: "pause" } & TargetedPlaybackCommand)
   | ({ type: "seek"; time: number } & TargetedPlaybackCommand)
   | ({ type: "setLooping"; looping: boolean } & TargetedPlaybackCommand)
-  | ({ type: "setRate"; rate: number } & TargetedPlaybackCommand);
+  | ({ type: "setRate"; rate: number } & TargetedPlaybackCommand)
+  | ({ type: "setLoopRange"; range: TimeRange | null } & TargetedPlaybackCommand);
 
 export interface TimelinePlaybackController {
   getSnapshot(): TimelinePlaybackSnapshot;
@@ -67,7 +76,14 @@ export function projectTimelinePlaybackTime(
   const rate = Number.isFinite(snapshot.rate) && (snapshot.rate as number) > 0 ? (snapshot.rate as number) : 1;
   const elapsed = (Math.max(0, nowUnixMs - (snapshot.sampledAtUnixMs ?? nowUnixMs)) / 1000) * rate;
   const projected = base + elapsed;
-  if (snapshot.looping && duration > 0) return projected % duration;
+  if (snapshot.looping && duration > 0) {
+    const loopRange = clampTimelineLoopRange(snapshot.loopRange, duration);
+    const loopStart = loopRange?.start ?? 0;
+    const loopEnd = loopRange?.end ?? duration;
+    const span = loopEnd - loopStart;
+    if (span > 0 && projected >= loopStart) return loopStart + ((projected - loopStart) % span);
+    return projected % duration;
+  }
   return Math.min(duration, projected);
 }
 
@@ -80,6 +96,7 @@ export function createLocalPlaybackController(duration: number, initialTime = 0)
     playing: false,
     looping: false,
     rate: 1,
+    loopRange: null,
     target: null,
     sampledAtUnixMs: Date.now(),
   };
@@ -102,9 +119,18 @@ export function createLocalPlaybackController(duration: number, initialTime = 0)
       lastTick = now;
       let time = snapshot.time + delta;
       let playing = true;
-      if (time >= duration) {
-        if (snapshot.looping && duration > 0) time %= duration;
-        else { time = duration; playing = false; stopTimer(); }
+      const loopRange = clampTimelineLoopRange(snapshot.loopRange, duration);
+      const loopEnd = loopRange?.end ?? duration;
+      if (time >= loopEnd) {
+        if (snapshot.looping && duration > 0) {
+          const loopStart = loopRange?.start ?? 0;
+          const span = loopEnd - loopStart;
+          time = span > 0 ? loopStart + ((time - loopStart) % span) : 0;
+        } else {
+          time = duration;
+          playing = false;
+          stopTimer();
+        }
       }
       snapshot = { ...snapshot, time, playing, sampledAtUnixMs: Date.now() };
       notify();
@@ -129,6 +155,10 @@ export function createLocalPlaybackController(duration: number, initialTime = 0)
           break;
         case "setLooping":
           snapshot = { ...snapshot, target: command.target, looping: command.looping };
+          notify();
+          break;
+        case "setLoopRange":
+          snapshot = { ...snapshot, target: command.target, loopRange: clampTimelineLoopRange(command.range, duration) };
           notify();
           break;
         case "setRate": {

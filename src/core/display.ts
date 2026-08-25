@@ -1,3 +1,5 @@
+import type { TimeRange } from "./contracts";
+
 export type TimelineDisplayMode = "frames" | "seconds";
 export type TimelineSeekPolicy = "unsnapped" | "frame-snap";
 
@@ -60,6 +62,20 @@ export function formatCompactTimelineReadout(
   return displayMode === "frames"
     ? `${String(Math.round(canonical * fps)).padStart(4, "0")} f`
     : `${canonical.toFixed(2)} s`;
+}
+
+/**
+ * Clamp a candidate loop range to `[0, duration]` and normalize a degenerate
+ * or malformed range (end <= start, non-finite bounds) to `null`, which
+ * callers treat as "no loop range" (playback loops the full duration).
+ */
+export function clampTimelineLoopRange(range: TimeRange | null | undefined, duration: number): TimeRange | null {
+  if (!range) return null;
+  const end = Number.isFinite(duration) && duration >= 0 ? duration : 0;
+  const start = clampTimelineTime(range.start, end);
+  const rawEnd = clampTimelineTime(range.end, end);
+  if (!(rawEnd > start)) return null;
+  return { start, end: rawEnd };
 }
 
 export function formatTimelineTick(time: number, displayMode: TimelineDisplayMode, frameRate = 24): string {
