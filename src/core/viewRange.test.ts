@@ -7,6 +7,7 @@ import {
   clampScrollLeft,
   fitPixelsPerSecond,
   panViewByFraction,
+  timelineGridSteps,
   viewRangeFromThumb,
   viewRangeThumb,
   wheelZoomFactor,
@@ -53,11 +54,23 @@ describe("zoomAroundAnchor", () => {
     expect(next.scrollLeft).toBe(0);
   });
 
-  it("wheel: negative deltaY (wheel up) zooms in, positive zooms out, lines scale up", () => {
-    expect(wheelZoomFactor(-100)).toBeGreaterThan(1);
-    expect(wheelZoomFactor(100)).toBeLessThan(1);
-    expect(wheelZoomFactor(-3, 1)).toBeCloseTo(wheelZoomFactor(-48), 9);
+  it("wheel: positive deltaY (wheel down) zooms in, negative zooms out, lines scale up", () => {
+    expect(wheelZoomFactor(100)).toBeGreaterThan(1);
+    expect(wheelZoomFactor(-100)).toBeLessThan(1);
+    expect(wheelZoomFactor(3, 1)).toBeCloseTo(wheelZoomFactor(48), 9);
     expect(wheelZoomFactor(Number.NaN)).toBe(1);
+  });
+
+  it("grid steps become frame-based once a frame is wide enough", () => {
+    expect(timelineGridSteps(30, 30)).toEqual({ gridStep: 1, labelStep: 1, frameGrid: false }); // 1px/frame -> coarse seconds
+    expect(timelineGridSteps(90, 30).frameGrid).toBe(false); // 3px/frame -> every 5 frames
+    expect(timelineGridSteps(90, 30).gridStep).toBeCloseTo(5 / 30, 9);
+    const fine = timelineGridSteps(300, 30); // 10px/frame -> 1F grid, labels every 10F
+    expect(fine.frameGrid).toBe(true);
+    expect(fine.gridStep).toBeCloseTo(1 / 30, 9);
+    expect(fine.labelStep).toBeCloseTo(10 / 30, 9);
+    expect(timelineGridSteps(450, 30).labelStep).toBeCloseTo(5 / 30, 9); // 15px/frame -> label every 5F
+    expect(timelineGridSteps(1500, 30).labelStep).toBeCloseTo(1 / 30, 9); // 50px/frame -> label every frame
   });
 });
 

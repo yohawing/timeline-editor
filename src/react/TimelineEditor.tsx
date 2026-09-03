@@ -39,6 +39,7 @@ import {
   clampScrollLeft,
   fitPixelsPerSecond,
   panViewByFraction,
+  timelineGridSteps,
   viewRangeFromThumb,
   viewRangeThumb,
   wheelRowZoomFactor,
@@ -920,6 +921,12 @@ export function TimelineEditor({
     canvas.height = Math.max(1, Math.round(viewport.height * dpr));
     canvas.style.width = `${viewport.width}px`;
     canvas.style.height = `${viewport.height}px`;
+    // The canvas is absolutely positioned inside the scroll container, so it
+    // would scroll away with the content; everything below is drawn in
+    // viewport space (translate(-scroll)), so pin it back onto the visible
+    // area. Without this, any horizontal scroll (zoom in, pan) left the
+    // right part of the viewport blank (2026-09-03 FB: "clip cut off").
+    canvas.style.transform = `translate(${scroll.left}px, ${scroll.top}px)`;
     const context = canvas.getContext("2d");
     if (!context) return;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -941,13 +948,19 @@ export function TimelineEditor({
       context.lineTo(scroll.left + viewport.width, y + rowHeight - .5);
       context.stroke();
     }
-    const gridStep = pixelsPerSecond >= 40 ? .5 : pixelsPerSecond >= 15 ? 1 : 5;
-    const firstGrid = Math.max(range.start, Math.floor(visibleTimeRange.start / gridStep) * gridStep);
-    const lastGrid = Math.min(range.end, visibleTimeRange.end);
+    // Grid: coarse second lines when zoomed out, a line per frame ("1F
+    // grid") once a frame is at least 6px wide — with second boundaries kept
+    // brighter so the rhythm stays readable. Iterated by index (not by
+    // accumulating a float step) so frame lines land exactly on frames.
+    const { gridStep, frameGrid } = timelineGridSteps(pixelsPerSecond, fps);
+    const firstIndex = Math.max(0, Math.floor((visibleTimeRange.start - range.start) / gridStep));
+    const lastIndex = Math.ceil((Math.min(range.end, visibleTimeRange.end) - range.start) / gridStep);
     const transform = createViewTransform(range.start, pixelsPerSecond);
-    for (let gridTime = firstGrid; gridTime <= lastGrid + gridStep * .001; gridTime += gridStep) {
-      const x = transform.timeToX(gridTime);
-      context.strokeStyle = Number.isInteger(gridTime) ? "rgba(255,255,255,.105)" : "rgba(255,255,255,.045)";
+    for (let index = firstIndex; index <= lastIndex; index += 1) {
+      const gridTime = range.start + index * gridStep;
+      const x = Math.round(transform.timeToX(gridTime)) + .5;
+      const onSecond = Math.abs(gridTime - Math.round(gridTime)) < gridStep * .01;
+      context.strokeStyle = onSecond ? "rgba(255,255,255,.14)" : frameGrid ? "rgba(255,255,255,.05)" : "rgba(255,255,255,.045)";
       context.beginPath();
       context.moveTo(x, scroll.top);
       context.lineTo(x, scroll.top + viewport.height);
@@ -988,7 +1001,7 @@ export function TimelineEditor({
     scroll.left,
     viewport.width,
     pixelsPerSecond,
-    pixelsPerSecond >= 40 ? .5 : pixelsPerSecond >= 15 ? 1 : 5,
+    timelineGridSteps(pixelsPerSecond, fps).labelStep,
   );
   const playbackReadout = variant === "compact"
     ? formatCompactTimelineReadout(time - range.start, duration, displayMode, fps)

@@ -265,10 +265,10 @@ describe("TimelineEditor transport and interaction boundary", () => {
     const root = document.querySelector(".timeline-editor") as HTMLElement;
     const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
     expect(root.style.getPropertyValue("--timeline-row-zoom")).toBe("1");
-    fireEvent(viewport, new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true }));
+    fireEvent(viewport, new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true }));
     const zoomed = Number(root.style.getPropertyValue("--timeline-row-zoom"));
     expect(zoomed).toBeGreaterThan(1);
-    fireEvent(viewport, new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true }));
+    fireEvent(viewport, new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true }));
     expect(Number(root.style.getPropertyValue("--timeline-row-zoom"))).toBeCloseTo(1, 6);
   });
 
@@ -278,9 +278,9 @@ describe("TimelineEditor transport and interaction boundary", () => {
     const content = document.querySelector(".timeline-editor__content") as HTMLDivElement;
     const startWidth = parseFloat(content.style.width);
     act(() => {
-      for (let i = 0; i < 3; i++) fireEvent(viewport, new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true }));
+      for (let i = 0; i < 3; i++) fireEvent(viewport, new WheelEvent("wheel", { deltaY: 100, bubbles: true, cancelable: true }));
     });
-    // Three notches of -100px: exp(0.0015 * 300) ~= 1.568x, not a single notch's 1.16x.
+    // Three notches of +100px (wheel down = zoom in): exp(0.0015 * 300) ~= 1.568x, not a single notch's 1.16x.
     expect(parseFloat(content.style.width) / startWidth).toBeCloseTo(Math.exp(0.45), 3);
   });
 
