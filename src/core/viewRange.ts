@@ -78,19 +78,40 @@ export function zoomAroundAnchor(
 
 /**
  * Wheel delta -> zoom factor. `deltaMode` follows `WheelEvent.deltaMode`
- * (0 pixels, 1 lines, 2 pages). One typical mouse notch (~100px) gives about
- * ×1.16; trackpad deltas are small and integrate smoothly.
+ * (0 pixels, 1 lines, 2 pages). Wheel DOWN (positive deltaY) zooms IN, wheel
+ * up zooms out — the direction UE's Sequencer and most NLE users expect
+ * (2026-09-03 FB: the opposite mapping read as inverted). One typical mouse
+ * notch (~100px) gives about ×1.16; trackpad deltas integrate smoothly.
  */
 export function wheelZoomFactor(deltaY: number, deltaMode = 0): number {
   const pixels = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * 400 : deltaY;
-  return Math.exp(-finite(pixels, 0) * 0.0015);
+  return Math.exp(finite(pixels, 0) * 0.0015);
 }
 
-/** Wheel delta -> row-height zoom factor (Ctrl+wheel). Coarser than the time
- * axis so a notch is a visible step. */
+/** Wheel delta -> row-height zoom factor (Ctrl+wheel). Same direction as the
+ * time axis (down = taller rows); coarser so a notch is a visible step. */
 export function wheelRowZoomFactor(deltaY: number, deltaMode = 0): number {
   const pixels = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * 400 : deltaY;
-  return Math.exp(-finite(pixels, 0) * 0.002);
+  return Math.exp(finite(pixels, 0) * 0.002);
+}
+
+/**
+ * Grid / ruler subdivision for the current zoom, in seconds. Frame-based once
+ * a frame is wide enough to tell apart: every frame from 6px per frame (the
+ * "1F grid"), every 5 frames from 2px, otherwise the coarse second steps.
+ * `labelStep` is the ruler's tick spacing (labels need more room than lines).
+ */
+export function timelineGridSteps(pixelsPerSecond: number, frameRate: number): { gridStep: number; labelStep: number; frameGrid: boolean } {
+  const pps = finite(pixelsPerSecond, 1);
+  const fps = finite(frameRate, 24) > 0 ? frameRate : 24;
+  const frameWidth = pps / fps;
+  if (frameWidth >= 6) {
+    const labelFrames = frameWidth >= 48 ? 1 : frameWidth >= 12 ? 5 : 10;
+    return { gridStep: 1 / fps, labelStep: labelFrames / fps, frameGrid: true };
+  }
+  if (frameWidth >= 2) return { gridStep: 5 / fps, labelStep: (frameWidth >= 4 ? 10 : 30) / fps, frameGrid: false };
+  const coarse = pps >= 40 ? 0.5 : pps >= 15 ? 1 : 5;
+  return { gridStep: coarse, labelStep: coarse, frameGrid: false };
 }
 
 export function clampRowZoom(rowZoom: number): number {
