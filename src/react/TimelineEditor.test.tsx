@@ -166,7 +166,8 @@ describe("TimelineEditor transport and interaction boundary", () => {
     const pointerDown = new Event("pointerdown", { bubbles: true });
     Object.assign(pointerDown, { button: 0, pointerId: 1, clientX: 10 });
     fireEvent(viewport, pointerDown);
-    expect(playback.dispatch).not.toHaveBeenCalled();
+    // Live scrub: the press already seeks to the pointer.
+    expect(playback.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "seek" }));
     const pointerMove = new Event("pointermove", { bubbles: true });
     Object.assign(pointerMove, { pointerId: 1, clientX: 100 });
     fireEvent(viewport, pointerMove);
@@ -200,7 +201,27 @@ describe("TimelineEditor transport and interaction boundary", () => {
       }
     });
     expect(renders.length).toBe(afterDown);
-    expect(playback.dispatch).not.toHaveBeenCalled();
+    // ...but each move seeks the controller (live scrub) — that is a
+    // dispatch, not a React state change.
+    const seeks = playback.dispatch.mock.calls.filter(([command]) => command.type === "seek");
+    expect(seeks.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("pauses a playing controller for the scrub and resumes it on release", () => {
+    const playback = controller({ playing: true });
+    render(<TimelineEditor dataSource={source()} playbackController={playback} frameRate={24} />);
+    const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
+    Object.defineProperty(viewport, "getBoundingClientRect", { value: () => ({ left: 0, top: 0, width: 300, height: 100 }) });
+    const pointerDown = new Event("pointerdown", { bubbles: true });
+    Object.assign(pointerDown, { button: 0, pointerId: 3, clientX: 40 });
+    fireEvent(viewport, pointerDown);
+    const types = () => playback.dispatch.mock.calls.map(([command]) => command.type);
+    expect(types()[0]).toBe("pause");
+    const pointerUp = new Event("pointerup", { bubbles: true });
+    Object.assign(pointerUp, { pointerId: 3, clientX: 80 });
+    fireEvent(viewport, pointerUp);
+    expect(types().at(-1)).toBe("play");
+    expect(types().filter((type) => type === "seek").length).toBeGreaterThanOrEqual(2);
   });
 
   it("steps the playhead with ArrowLeft/ArrowRight when the track viewport has focus", () => {
