@@ -960,7 +960,7 @@ export function TimelineEditor({
       const gridTime = range.start + index * gridStep;
       const x = Math.round(transform.timeToX(gridTime)) + .5;
       const onSecond = Math.abs(gridTime - Math.round(gridTime)) < gridStep * .01;
-      context.strokeStyle = onSecond ? "rgba(255,255,255,.14)" : frameGrid ? "rgba(255,255,255,.05)" : "rgba(255,255,255,.045)";
+      context.strokeStyle = onSecond ? "rgba(255,255,255,.16)" : frameGrid ? "rgba(255,255,255,.085)" : "rgba(255,255,255,.045)";
       context.beginPath();
       context.moveTo(x, scroll.top);
       context.lineTo(x, scroll.top + viewport.height);
