@@ -1,10 +1,13 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactElement,
   type ReactNode,
@@ -30,6 +33,20 @@ import {
   TIMELINE_ROW_HEIGHT,
   visibleTimelineRowQuery,
 } from "../core/layout";
+import {
+  clampPixelsPerSecond,
+  clampRowZoom,
+  clampScrollLeft,
+  fitPixelsPerSecond,
+  panViewByFraction,
+  viewRangeFromThumb,
+  viewRangeThumb,
+  wheelRowZoomFactor,
+  wheelZoomFactor,
+  zoomAroundAnchor,
+  type ViewRange,
+  type ViewRangeThumb,
+} from "../core/viewRange";
 import type {
   TimelinePlaybackCommand,
   TimelinePlaybackController,
@@ -87,6 +104,17 @@ export interface TimelineEditorProps {
    * equivalent tab/heading (e.g. a docking layout) to avoid a duplicate title.
    */
   showTitle?: boolean;
+  /**
+   * Frame-rate picker in the toolbar, replacing the read-only "N fps" label.
+   * Fully controlled: the host lists the choices, names the current one
+   * (`frameRateValue`) and receives the pick. Values are opaque strings so a
+   * host can offer entries like "auto" next to numbers; `frameRate` itself
+   * stays the number used for display/snapping. Omit `frameRateOptions` to
+   * keep the read-only label.
+   */
+  frameRateOptions?: ReadonlyArray<{ value: string; label: string }>;
+  frameRateValue?: string;
+  onFrameRateChange?: (value: string) => void;
   className?: string;
   onDiagnostic?: (diagnostic: TimelineDiagnostic) => void;
   onPerformanceSummary?: (summary: TimelinePerformanceSummary) => void;
@@ -98,9 +126,6 @@ interface CanvasViewport {
   height: number;
 }
 
-const MIN_PIXELS_PER_SECOND = 12;
-const MAX_PIXELS_PER_SECOND = 180;
-const DEFAULT_ZOOM_PERCENT = 38;
 const EMPTY_PLAYBACK: TimelinePlaybackSnapshot = {
   available: false,
   time: 0,
@@ -120,11 +145,6 @@ function nextTimelineRate(rate: number): number {
 
 function formatTimelineRate(rate: number): string {
   return `${rate}x`;
-}
-
-function pixelsPerSecondFromZoom(zoomPercent: number): number {
-  const percent = Math.min(100, Math.max(0, Number.isFinite(zoomPercent) ? zoomPercent : DEFAULT_ZOOM_PERCENT));
-  return MIN_PIXELS_PER_SECOND + (MAX_PIXELS_PER_SECOND - MIN_PIXELS_PER_SECOND) * percent / 100;
 }
 
 function safeRange(dataSource: TimelineDataSource): { start: number; end: number } {
@@ -352,6 +372,9 @@ export function TimelineEditor({
   frameRate = 24,
   displayMode: initialDisplayMode = "frames",
   variant = "full",
+  frameRateOptions,
+  frameRateValue,
+  onFrameRateChange,
   showTitle = true,
   className,
   onDiagnostic,
@@ -397,10 +420,37 @@ export function TimelineEditor({
   const range = useMemo(() => safeRange(dataSource), [dataSource, revision]);
   const duration = Math.max(0, range.end - range.start);
   const [displayMode, setDisplayMode] = useState<"frames" | "seconds">(initialDisplayMode);
-  const [zoomPercent, setZoomPercent] = useState(DEFAULT_ZOOM_PERCENT);
-  const pixelsPerSecond = pixelsPerSecondFromZoom(zoomPercent);
   const [scroll, setScroll] = useState({ left: 0, top: 0 });
   const [viewport, setViewport] = useState<CanvasViewport>({ width: 0, height: 0 });
+  /**
+   * Horizontal zoom. `null` = "fit the whole clip to the viewport" — the
+   * default, re-applied whenever the clip's range changes (a new clip shows
+   * in full, like UE's Sequencer). A number is a user zoom (wheel / range
+   * bar), clamped so the view never shows less than the whole clip and
+   * never more than MAX_PIXELS_PER_SECOND. See core/viewRange.ts.
+   */
+  const [zoomPixelsPerSecond, setZoomPixelsPerSecond] = useState<number | null>(null);
+  const pixelsPerSecond = zoomPixelsPerSecond === null
+    ? fitPixelsPerSecond(duration, viewport.width)
+    : clampPixelsPerSecond(zoomPixelsPerSecond, duration, viewport.width);
+  /**
+   * Vertical zoom (Ctrl+wheel): a multiplier on `--timeline-row-height`,
+   * applied as `--timeline-row-zoom` on the root element. The row-height
+   * probe below measures the scaled result, so the canvas and the DOM row
+   * strip follow it with no further plumbing.
+   */
+  const [rowZoom, setRowZoom] = useState(1);
+  // A scrollLeft to apply after the next commit — set together with a zoom
+  // change so the browser clamps it against the NEW content width, not the
+  // one still in the DOM at event time.
+  const pendingScrollLeftRef = useRef<number | null>(null);
+  // The view most recently handed to `applyView` and not yet rendered —
+  // several wheel events in one frame must each build on the previous one,
+  // not on the state the last render saw.
+  const pendingViewRef = useRef<ViewRange | null>(null);
+  const rangeBarRef = useRef<HTMLDivElement>(null);
+  const rulerRef = useRef<HTMLDivElement>(null);
+  const rangeDragRef = useRef<{ pointerId: number; mode: "pan" | "start" | "end"; originX: number; view: ViewRange; thumb: ViewRangeThumb } | null>(null);
   const [devicePixelRatio, setDevicePixelRatio] = useState(safeDevicePixelRatio);
   const [localTime, setLocalTime] = useState(range.start);
   const [scrubbing, setScrubbing] = useState(false);
@@ -436,6 +486,20 @@ export function TimelineEditor({
   useEffect(() => {
     setLocalTime((time) => clampTimelineTime(time, range.end));
   }, [range.end]);
+
+  // A different clip (range) -> back to "fit the whole clip".
+  useEffect(() => {
+    setZoomPixelsPerSecond(null);
+  }, [range.start, range.end]);
+
+  useLayoutEffect(() => {
+    pendingViewRef.current = null;
+    const pending = pendingScrollLeftRef.current;
+    const element = timelineViewportRef.current;
+    if (pending === null || !element) return;
+    pendingScrollLeftRef.current = null;
+    element.scrollLeft = pending;
+  });
 
   useEffect(() => {
     setDisplayMode(initialDisplayMode);
@@ -665,6 +729,149 @@ export function TimelineEditor({
     dispatchLoopRange(null);
   }, [dispatchLoopRange]);
 
+  /**
+   * Sets zoom and horizontal scroll together. `scroll.left` is updated in the
+   * same render (so the canvas, ticks and playhead already agree with the
+   * new zoom), and the DOM scrollLeft is applied after commit (see
+   * `pendingScrollLeftRef`); the resulting scroll event then re-reads the
+   * same value.
+   */
+  const applyView = useCallback((next: ViewRange) => {
+    pendingViewRef.current = next;
+    setZoomPixelsPerSecond(next.pixelsPerSecond);
+    pendingScrollLeftRef.current = next.scrollLeft;
+    setScroll((current) => (current.left === next.scrollLeft ? current : { ...current, left: next.scrollLeft }));
+  }, []);
+
+  const viewRef = useRef<{ pixelsPerSecond: number; duration: number; width: number }>({ pixelsPerSecond, duration, width: viewport.width });
+  viewRef.current = { pixelsPerSecond, duration, width: viewport.width };
+
+  /**
+   * Wheel over the ruler or the track viewport (UE Sequencer conventions):
+   *   wheel        -> zoom the time axis around the pointer
+   *   Ctrl+wheel   -> zoom row height (vertical)
+   *   Shift+wheel  -> pan horizontally (a trackpad's horizontal delta pans too)
+   * Native listener (not React's onWheel) so the default page/viewport
+   * scroll can be prevented — React registers wheel as passive.
+   */
+  useEffect(() => {
+    const viewportElement = timelineViewportRef.current;
+    if (!viewportElement) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.altKey || event.metaKey) return;
+      const { duration: clipDuration, width } = viewRef.current;
+      const base: ViewRange = pendingViewRef.current ?? { pixelsPerSecond: viewRef.current.pixelsPerSecond, scrollLeft: viewportElement.scrollLeft };
+      const pps = base.pixelsPerSecond;
+      if (event.ctrlKey) {
+        event.preventDefault();
+        setRowZoom((zoom) => clampRowZoom(zoom * wheelRowZoomFactor(event.deltaY, event.deltaMode)));
+        return;
+      }
+      const horizontal = event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY);
+      if (horizontal) {
+        event.preventDefault();
+        const raw = event.shiftKey ? (event.deltaY || event.deltaX) : event.deltaX;
+        const delta = event.deltaMode === 1 ? raw * 16 : event.deltaMode === 2 ? raw * width : raw;
+        applyView({ pixelsPerSecond: pps, scrollLeft: clampScrollLeft(base.scrollLeft + delta, clipDuration, pps, width) });
+        return;
+      }
+      if (event.deltaY === 0) return;
+      event.preventDefault();
+      const anchorX = event.clientX - viewportElement.getBoundingClientRect().left;
+      applyView(zoomAroundAnchor(
+        base,
+        wheelZoomFactor(event.deltaY, event.deltaMode),
+        anchorX,
+        clipDuration,
+        width,
+      ));
+    };
+    const rulerElement = rulerRef.current;
+    viewportElement.addEventListener("wheel", onWheel, { passive: false });
+    rulerElement?.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      viewportElement.removeEventListener("wheel", onWheel);
+      rulerElement?.removeEventListener("wheel", onWheel);
+    };
+  }, [applyView]);
+
+  const thumb = viewRangeThumb({ pixelsPerSecond, scrollLeft: scroll.left }, duration, viewport.width);
+
+  const rangeBarFraction = useCallback((clientX: number) => {
+    const bar = rangeBarRef.current;
+    if (!bar) return 0;
+    const rect = bar.getBoundingClientRect();
+    return rect.width > 0 ? (clientX - rect.left) / rect.width : 0;
+  }, []);
+
+  // Range bar: drag the thumb to pan, drag either handle to zoom that side,
+  // click the empty bar to centre the view there, double-click to fit.
+  const onRangeBarPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const bar = event.currentTarget;
+    const { pixelsPerSecond: pps, duration: clipDuration, width } = viewRef.current;
+    const view: ViewRange = { pixelsPerSecond: pps, scrollLeft: timelineViewportRef.current?.scrollLeft ?? scroll.left };
+    const current = viewRangeThumb(view, clipDuration, width);
+    const target = event.target as HTMLElement;
+    const mode: "pan" | "start" | "end" = target.classList.contains("timeline-editor__range-handle--start")
+      ? "start"
+      : target.classList.contains("timeline-editor__range-handle--end")
+        ? "end"
+        : "pan";
+    let startView = view;
+    if (mode === "pan" && !target.closest(".timeline-editor__range-thumb")) {
+      // Clicked the empty bar: centre the visible window on the click.
+      const centre = rangeBarFraction(event.clientX);
+      const half = (current.end - current.start) / 2;
+      startView = panViewByFraction(view, centre - half - current.start, clipDuration, width);
+      applyView(startView);
+    }
+    rangeDragRef.current = { pointerId: event.pointerId, mode, originX: event.clientX, view: startView, thumb: viewRangeThumb(startView, clipDuration, width) };
+    bar.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }, [applyView, rangeBarFraction, scroll.left]);
+
+  const onRangeBarPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = rangeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const bar = event.currentTarget.getBoundingClientRect();
+    if (bar.width <= 0) return;
+    const { duration: clipDuration, width } = viewRef.current;
+    const dx = (event.clientX - drag.originX) / bar.width;
+    if (drag.mode === "pan") {
+      applyView(panViewByFraction(drag.view, dx, clipDuration, width));
+      return;
+    }
+    const next: ViewRangeThumb = drag.mode === "start"
+      ? { start: drag.thumb.start + dx, end: drag.thumb.end }
+      : { start: drag.thumb.start, end: drag.thumb.end + dx };
+    applyView(viewRangeFromThumb(next, clipDuration, width, drag.mode === "start" ? "end" : "start"));
+  }, [applyView]);
+
+  const onRangeBarPointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = rangeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    rangeDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }, []);
+
+  const onRangeThumbKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const { pixelsPerSecond: pps, duration: clipDuration, width } = viewRef.current;
+    const view: ViewRange = { pixelsPerSecond: pps, scrollLeft: timelineViewportRef.current?.scrollLeft ?? scroll.left };
+    const current = viewRangeThumb(view, clipDuration, width);
+    const step = (current.end - current.start) * 0.1 * (event.key === "ArrowLeft" ? -1 : 1);
+    applyView(panViewByFraction(view, step, clipDuration, width));
+  }, [applyView, scroll.left]);
+
+  const fitView = useCallback(() => {
+    setZoomPixelsPerSecond(null);
+    pendingScrollLeftRef.current = 0;
+    setScroll((current) => (current.left === 0 ? current : { ...current, left: 0 }));
+  }, []);
+
   const onScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const element = event.currentTarget;
     setScroll({ left: element.scrollLeft, top: element.scrollTop });
@@ -782,7 +989,7 @@ export function TimelineEditor({
   } : undefined;
 
   return (
-    <section className={rootClassName} aria-label="Timeline editor">
+    <section className={rootClassName} aria-label="Timeline editor" style={{ "--timeline-row-zoom": rowZoom } as CSSProperties}>
       <div ref={rowHeightProbeRef} className="timeline-editor__row-height-probe" aria-hidden="true" />
       <header className="timeline-editor__header">
         <div className="timeline-editor__toolbar">
@@ -818,10 +1025,18 @@ export function TimelineEditor({
             </button>
           </div>
           <button ref={readoutRef} type="button" className="timeline-editor__readout" onClick={() => setDisplayMode((mode) => mode === "frames" ? "seconds" : "frames")} aria-label="Toggle time display">{playbackReadout}</button>
-          <label className="timeline-editor__zoom">Zoom
-            <input type="range" min="0" max="100" value={zoomPercent} onChange={(event) => setZoomPercent(Number(event.target.value))} aria-label="Timeline zoom" />
-          </label>
-          <span className="timeline-editor__fps">{fps} fps</span>
+          {frameRateOptions ? (
+            <select
+              className="timeline-editor__fps timeline-editor__fps-select"
+              aria-label="Frame rate"
+              value={frameRateValue ?? String(fps)}
+              onChange={(event) => onFrameRateChange?.(event.target.value)}
+            >
+              {frameRateOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          ) : (
+            <span className="timeline-editor__fps">{fps} fps</span>
+          )}
           <div className="timeline-editor__slot timeline-editor__slot--end">{slots?.toolbarEnd}</div>
         </div>
       </header>
@@ -845,6 +1060,7 @@ export function TimelineEditor({
         <div className="timeline-editor__ruler-and-tracks">
           <div
             className="timeline-editor__ruler"
+            ref={rulerRef}
             aria-label="Seek timeline"
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
@@ -889,6 +1105,40 @@ export function TimelineEditor({
             </div>
           )}
           <div className="timeline-editor__playhead" ref={playheadRef} />
+        </div>
+        {/*
+          View range bar (UE Sequencer style): the whole clip is the bar,
+          the thumb is what the track viewport currently shows. Replaces
+          both the zoom slider and the viewport's native horizontal
+          scrollbar — drag the thumb to pan, drag a handle to zoom that
+          side, click the bar to centre the view, double-click to fit.
+        */}
+        <div className="timeline-editor__range-corner" aria-hidden="true" />
+        <div
+          className="timeline-editor__range-bar"
+          ref={rangeBarRef}
+          title="Drag to pan. Drag the ends to zoom. Double-click to fit the clip. Wheel: zoom, Shift+wheel: pan, Ctrl+wheel: row height."
+          onPointerDown={onRangeBarPointerDown}
+          onPointerMove={onRangeBarPointerMove}
+          onPointerUp={onRangeBarPointerUp}
+          onPointerCancel={onRangeBarPointerUp}
+          onDoubleClick={fitView}
+        >
+          <div
+            className="timeline-editor__range-thumb"
+            role="scrollbar"
+            aria-label="Timeline view range"
+            aria-orientation="horizontal"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(thumb.start * 100)}
+            tabIndex={0}
+            style={{ left: `${thumb.start * 100}%`, width: `${Math.max(0, thumb.end - thumb.start) * 100}%` }}
+            onKeyDown={onRangeThumbKeyDown}
+          >
+            <span className="timeline-editor__range-handle timeline-editor__range-handle--start" />
+            <span className="timeline-editor__range-handle timeline-editor__range-handle--end" />
+          </div>
         </div>
       </div>
     </section>

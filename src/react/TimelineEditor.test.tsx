@@ -216,9 +216,69 @@ describe("TimelineEditor transport and interaction boundary", () => {
   it("does not steal ArrowLeft/ArrowRight from an unrelated input", () => {
     const playback = controller();
     render(<TimelineEditor dataSource={source()} playbackController={playback} frameRate={24} />);
-    const zoom = screen.getByRole("slider", { name: "Timeline zoom" });
-    fireEvent.keyDown(zoom, { key: "ArrowRight" });
+    const rangeThumb = screen.getByRole("scrollbar", { name: "Timeline view range" });
+    fireEvent.keyDown(rangeThumb, { key: "ArrowRight" });
     expect(playback.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "seek" }));
+  });
+
+  it("renders a frame-rate picker when the host supplies options and reports the pick", () => {
+    const onFrameRateChange = vi.fn();
+    render(
+      <TimelineEditor
+        dataSource={source()}
+        frameRate={30}
+        frameRateOptions={[{ value: "auto", label: "Auto (30 fps)" }, { value: "60", label: "60 fps" }]}
+        frameRateValue="auto"
+        onFrameRateChange={onFrameRateChange}
+      />,
+    );
+    const picker = screen.getByRole("combobox", { name: "Frame rate" }) as HTMLSelectElement;
+    expect(picker.value).toBe("auto");
+    expect(screen.queryByText("30 fps")).toBeNull();
+    fireEvent.change(picker, { target: { value: "60" } });
+    expect(onFrameRateChange).toHaveBeenCalledWith("60");
+  });
+
+  it("zooms row height with Ctrl+wheel and leaves the time axis alone", () => {
+    render(<TimelineEditor dataSource={source()} frameRate={24} />);
+    const root = document.querySelector(".timeline-editor") as HTMLElement;
+    const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
+    expect(root.style.getPropertyValue("--timeline-row-zoom")).toBe("1");
+    fireEvent(viewport, new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true }));
+    const zoomed = Number(root.style.getPropertyValue("--timeline-row-zoom"));
+    expect(zoomed).toBeGreaterThan(1);
+    fireEvent(viewport, new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true }));
+    expect(Number(root.style.getPropertyValue("--timeline-row-zoom"))).toBeCloseTo(1, 6);
+  });
+
+  it("accumulates several wheel notches delivered before a re-render", () => {
+    render(<TimelineEditor dataSource={source()} frameRate={24} />);
+    const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
+    const content = document.querySelector(".timeline-editor__content") as HTMLDivElement;
+    const startWidth = parseFloat(content.style.width);
+    act(() => {
+      for (let i = 0; i < 3; i++) fireEvent(viewport, new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true }));
+    });
+    // Three notches of -100px: exp(0.0015 * 300) ~= 1.568x, not a single notch's 1.16x.
+    expect(parseFloat(content.style.width) / startWidth).toBeCloseTo(Math.exp(0.45), 3);
+  });
+
+  it("does not throw on plain / Shift wheel and exposes the view range thumb", () => {
+    render(<TimelineEditor dataSource={source()} frameRate={24} />);
+    const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
+    const wheel = new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true });
+    fireEvent(viewport, wheel);
+    expect(wheel.defaultPrevented).toBe(true);
+    const thumb = screen.getByRole("scrollbar", { name: "Timeline view range" });
+    expect(thumb.getAttribute("aria-valuenow")).toBe("0");
+    // Shift+wheel pans: the thumb moves right (jsdom has no layout, so the
+    // fallback zoom of 76px/s over the fixture's range is what it pans within).
+    fireEvent(viewport, new WheelEvent("wheel", { deltaY: 40, shiftKey: true, bubbles: true, cancelable: true }));
+    expect(Number(thumb.getAttribute("aria-valuenow"))).toBeGreaterThan(0);
+    // Double-click the bar: back to the fit (start of the clip).
+    fireEvent.doubleClick(document.querySelector(".timeline-editor__range-bar") as HTMLDivElement);
+    expect(thumb.getAttribute("aria-valuenow")).toBe("0");
+    expect(screen.queryByRole("slider", { name: "Timeline zoom" })).toBeNull();
   });
 
   it("scrubs by dragging on the frame-number ruler and snaps to an integer frame", () => {

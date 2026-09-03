@@ -25,6 +25,9 @@
   --timeline-tabs-height: 1.5rem; /* 24px */
   --timeline-toolbar-height: 1.5rem; /* 24px */
   --timeline-ruler-height: 1.5rem; /* 24px: tick labels + the loop-range lane */
+  --timeline-range-bar-height: 0.75rem; /* 12px: the view range bar under the tracks */
+  /* Vertical zoom (Ctrl+wheel) — the React layer sets this inline on the root. */
+  --timeline-row-zoom: 1;
   --timeline-font: Inter, "Segoe UI", sans-serif;
   --timeline-mono: "JetBrains Mono", Consolas, monospace;
   display: grid;
@@ -50,7 +53,7 @@
   top: 0;
   left: 0;
   width: 0;
-  height: var(--timeline-row-height);
+  height: calc(var(--timeline-row-height) * var(--timeline-row-zoom));
   overflow: hidden;
   visibility: hidden;
   pointer-events: none;
@@ -127,17 +130,28 @@
 .timeline-editor__button.is-active { color: #c8dcff; background: var(--timeline-accent-soft); border-color: rgba(90,143,224,.4); }
 .timeline-editor__button:disabled { opacity: .42; cursor: default; }
 .timeline-editor__readout { min-width: 4.75rem; padding: 0 0.25rem; color: var(--timeline-text); font-family: var(--timeline-mono); font-size: 0.5625rem; font-variant-numeric: tabular-nums; } /* 76px, 4px, 9px */
-.timeline-editor__zoom { display: flex; align-items: center; gap: 0.3125rem; color: var(--timeline-text-muted); white-space: nowrap; } /* 5px */
-.timeline-editor__zoom input { width: 4.75rem; accent-color: var(--timeline-accent); cursor: ew-resize; } /* 76px */
 .timeline-editor__fps { color: var(--timeline-text-dim); font-family: var(--timeline-mono); font-size: 0.5625rem; white-space: nowrap; } /* 9px */
+.timeline-editor__fps-select {
+  appearance: auto;
+  height: var(--timeline-control-height);
+  padding: 0 0.125rem;
+  border: 1px solid transparent;
+  border-radius: 0.1875rem; /* 3px */
+  background: transparent;
+  color: var(--timeline-text-muted);
+  cursor: pointer;
+}
+.timeline-editor__fps-select:hover { color: #fff; background: rgba(255,255,255,.08); }
+.timeline-editor__fps-select option { background: var(--timeline-surface-2); color: var(--timeline-text); }
 
 .timeline-editor__body {
   display: grid;
   grid-template-columns: var(--timeline-tree-width) minmax(0, 1fr);
-  grid-template-rows: var(--timeline-ruler-height) minmax(0, 1fr);
+  grid-template-rows: var(--timeline-ruler-height) minmax(0, 1fr) var(--timeline-range-bar-height);
   grid-template-areas:
     "tree-heading  ruler-tracks"
-    "tree-viewport ruler-tracks";
+    "tree-viewport ruler-tracks"
+    "range-corner  range-bar";
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -213,7 +227,7 @@
   box-sizing: border-box;
   align-items: center;
   width: 100%;
-  height: var(--timeline-row-height);
+  height: calc(var(--timeline-row-height) * var(--timeline-row-zoom));
   padding-right: 0.4375rem; /* 7px */
   overflow: hidden;
   border-bottom: 1px solid rgba(255,255,255,.055);
@@ -236,7 +250,10 @@
   position: relative;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  /* Horizontal scrolling is owned by the range bar below the tracks (and
+     wheel/Shift+wheel); scrollLeft is still driven programmatically. */
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--timeline-surface-1);
   cursor: default;
   scrollbar-color: #3a3a44 transparent;
@@ -285,6 +302,53 @@
 .timeline-editor__viewport::-webkit-scrollbar-track { background: transparent; }
 .timeline-editor__viewport::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 0.25rem; background: #3a3a44; background-clip: content-box; } /* 4px */
 
+/* View range bar (see the JSX comment in TimelineEditor.tsx). */
+.timeline-editor__range-corner { grid-area: range-corner; background: var(--timeline-surface-2); border-top: 1px solid var(--timeline-divider); border-right: 1px solid var(--timeline-divider); }
+.timeline-editor__range-bar {
+  grid-area: range-bar;
+  position: relative;
+  min-width: 0;
+  background: var(--timeline-surface-2);
+  border-top: 1px solid var(--timeline-divider);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+.timeline-editor__range-thumb {
+  position: absolute;
+  top: 0.125rem; /* 2px */
+  bottom: 0.125rem;
+  box-sizing: border-box;
+  min-width: 0.75rem; /* 12px: room for both handles */
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 0.1875rem; /* 3px */
+  background: #3a3a44;
+  cursor: grab;
+}
+.timeline-editor__range-thumb:hover { background: #45454f; }
+.timeline-editor__range-thumb:focus-visible { outline: 1px solid #5a8fe0; outline-offset: -1px; }
+.timeline-editor__range-bar:active .timeline-editor__range-thumb { cursor: grabbing; }
+.timeline-editor__range-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0.375rem; /* 6px */
+  cursor: ew-resize;
+}
+.timeline-editor__range-handle::after {
+  content: "";
+  position: absolute;
+  top: 0.125rem;
+  bottom: 0.125rem;
+  left: 0.125rem;
+  width: 0.125rem;
+  border-radius: 1px;
+  background: rgba(255,255,255,.35);
+}
+.timeline-editor__range-handle--start { left: 0; }
+.timeline-editor__range-handle--end { right: 0; }
+.timeline-editor__range-handle--end::after { left: auto; right: 0.125rem; }
+
 .timeline-editor--compact .timeline-editor__tree-heading { font-size: 0.5rem; } /* 8px */
 .timeline-editor--compact .timeline-editor__row { font-size: 0.5rem; } /* 8px */
 .timeline-editor--compact .timeline-editor__row-binding,
@@ -294,6 +358,4 @@
 
 @media (max-width: 760px) {
   .timeline-editor__fps { display: none; }
-  .timeline-editor__zoom { font-size: 0; }
-  .timeline-editor__zoom input { width: 3.625rem; } /* 58px */
 }
