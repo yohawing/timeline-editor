@@ -244,10 +244,14 @@ function drawItem(
   rowHeight: number,
 ): void {
   const rowY = rowIndex * rowHeight;
+  // Every pixel constant below was drawn for the 26px design row; scale them
+  // with the *rendered* row height (host UI scale, Ctrl+wheel row zoom) so
+  // the clip band and the DOM row strip keep the same proportions.
+  const s = rowHeight / TIMELINE_ROW_HEIGHT;
   if (item.kind === "clip") {
     const x = timeToX(item.range.start);
     const width = Math.max(3, timeToX(item.range.end) - x);
-    roundedRect(context, x + 1, rowY + 4, width - 2, 18, 3);
+    roundedRect(context, x + 1, rowY + 4 * s, width - 2, 18 * s, 3 * s);
     context.globalAlpha = 0.82;
     context.fillStyle = item.color;
     context.fill();
@@ -257,12 +261,12 @@ function drawItem(
     context.stroke();
     context.save();
     context.beginPath();
-    context.rect(x + 7, rowY + 4, Math.max(0, width - 14), 18);
+    context.rect(x + 7 * s, rowY + 4 * s, Math.max(0, width - 14 * s), 18 * s);
     context.clip();
     context.fillStyle = "rgba(255,255,255,.9)";
-    context.font = "500 10px Inter, Segoe UI, sans-serif";
+    context.font = `500 ${10 * s}px Inter, Segoe UI, sans-serif`;
     context.textBaseline = "middle";
-    context.fillText(item.label, x + 8, rowY + 13);
+    context.fillText(item.label, x + 8 * s, rowY + 13 * s);
     context.restore();
     return;
   }
@@ -270,32 +274,32 @@ function drawItem(
   const x = timeToX(item.time);
   context.fillStyle = item.color;
   if (item.kind === "marker") {
-    context.fillRect(x, rowY + 7, 1, 15);
+    context.fillRect(x, rowY + 7 * s, 1, 15 * s);
     context.beginPath();
-    context.moveTo(x - 5, rowY + 5);
-    context.lineTo(x + 5, rowY + 5);
-    context.lineTo(x, rowY + 11);
+    context.moveTo(x - 5 * s, rowY + 5 * s);
+    context.lineTo(x + 5 * s, rowY + 5 * s);
+    context.lineTo(x, rowY + 11 * s);
     context.closePath();
     context.fill();
   } else if (item.kind === "event-cue") {
     context.beginPath();
-    context.moveTo(x, rowY + 5);
-    context.lineTo(x + 6, rowY + 9);
-    context.lineTo(x + 6, rowY + 17);
-    context.lineTo(x, rowY + 21);
-    context.lineTo(x - 6, rowY + 17);
-    context.lineTo(x - 6, rowY + 9);
+    context.moveTo(x, rowY + 5 * s);
+    context.lineTo(x + 6 * s, rowY + 9 * s);
+    context.lineTo(x + 6 * s, rowY + 17 * s);
+    context.lineTo(x, rowY + 21 * s);
+    context.lineTo(x - 6 * s, rowY + 17 * s);
+    context.lineTo(x - 6 * s, rowY + 9 * s);
     context.closePath();
     context.fill();
   } else {
     context.beginPath();
-    context.arc(x, rowY + 13, 5, 0, Math.PI * 2);
+    context.arc(x, rowY + 13 * s, 5 * s, 0, Math.PI * 2);
     context.fill();
   }
   context.fillStyle = "rgba(238,238,244,.78)";
-  context.font = "500 9px Inter, Segoe UI, sans-serif";
+  context.font = `500 ${9 * s}px Inter, Segoe UI, sans-serif`;
   context.textBaseline = "middle";
-  context.fillText(item.label, x + 9, rowY + 13);
+  context.fillText(item.label, x + 9 * s, rowY + 13 * s);
 }
 
 function drawKey(
@@ -305,9 +309,10 @@ function drawKey(
   timeToX: (time: number) => number,
   rowHeight: number,
 ): void {
+  const s = rowHeight / TIMELINE_ROW_HEIGHT;
   const x = timeToX(key.time);
-  const y = rowIndex * rowHeight + 19;
-  const radius = key.selected ? 4.5 : 3.5;
+  const y = rowIndex * rowHeight + 19 * s;
+  const radius = (key.selected ? 4.5 : 3.5) * s;
   context.beginPath();
   context.moveTo(x, y - radius);
   context.lineTo(x + radius, y);
@@ -458,6 +463,9 @@ export function TimelineEditor({
   const [loopDragPreview, setLoopDragPreview] = useState<TimeRange | null>(null);
   const scrubOriginRef = useRef(range.start);
   const scrubPreviewRef = useRef(range.start);
+  // Live scrubbing: the controller was playing when the scrub started, so it
+  // is paused for the drag and resumed when the pointer is released.
+  const scrubWasPlayingRef = useRef(false);
   const pointerIdRef = useRef<number | null>(null);
   const loopPointerIdRef = useRef<number | null>(null);
   const loopDragOriginRef = useRef(range.start);
@@ -612,7 +620,14 @@ export function TimelineEditor({
     );
     scrubPreviewRef.current = next;
     updatePlayhead(next);
-  }, [fps, pixelsPerSecond, range.end, range.start, updatePlayhead]);
+    // Live scrub: every pointer sample seeks the controller so the host
+    // (a 3D viewport, an audio engine) follows the drag, not just the
+    // playhead line. Without a controller the local time is only committed
+    // on release (a state update per move would re-render the whole editor).
+    if (playbackController && playbackSnapshot.available) {
+      dispatchSafely(playbackController, { type: "seek", time: next, target: commandTarget }, onDiagnostic);
+    }
+  }, [commandTarget, fps, onDiagnostic, pixelsPerSecond, playbackController, playbackSnapshot.available, range.end, range.start, updatePlayhead]);
 
   const onPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -621,8 +636,12 @@ export function TimelineEditor({
     scrubPreviewRef.current = time;
     event.currentTarget.setPointerCapture(event.pointerId);
     setScrubbing(true);
+    scrubWasPlayingRef.current = Boolean(playbackController && playbackSnapshot.available && playbackSnapshot.playing);
+    if (scrubWasPlayingRef.current && playbackController) {
+      dispatchSafely(playbackController, { type: "pause", target: commandTarget }, onDiagnostic);
+    }
     seekFromClientX(event.clientX);
-  }, [seekFromClientX, time]);
+  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, playbackSnapshot.playing, seekFromClientX, time]);
 
   const onPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (pointerIdRef.current !== event.pointerId) return;
@@ -642,6 +661,10 @@ export function TimelineEditor({
     } else if (!playbackController) {
       setLocalTime(scrubPreviewRef.current);
     }
+    if (scrubWasPlayingRef.current && playbackController && playbackSnapshot.available) {
+      dispatchSafely(playbackController, { type: "play", target: commandTarget }, onDiagnostic);
+    }
+    scrubWasPlayingRef.current = false;
     pointerIdRef.current = null;
     setScrubbing(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
