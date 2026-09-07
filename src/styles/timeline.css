@@ -202,6 +202,8 @@
 }
 .timeline-editor__tick { position: absolute; top: 0.1875rem; color: var(--timeline-text-dim); font-family: var(--timeline-mono); font-size: 0.5rem; transform: translateX(-50%); white-space: nowrap; pointer-events: none; } /* 3px, 8px */
 
+.timeline-editor__tick--measure { visibility: hidden; left: 0; transform: none; }
+
 /* Dedicated drag lane for setting the loop in/out range, kept separate
    from the rest of the ruler (which scrubs the playhead on drag). */
 .timeline-editor__loop-lane {

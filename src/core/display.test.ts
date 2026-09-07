@@ -4,12 +4,33 @@ import {
   clampTimelineTime,
   formatCompactTimelineReadout,
   formatTimelineReadout,
+  formatTimelineTick,
+  timelineRulerStep,
   resolveTimelineSeekTime,
   snapTimelineTimeToFrame,
   visibleTimelineTicks,
 } from "./display";
 
 describe("timeline display policies", () => {
+  it("does not zero-pad ruler labels, including signed and six-digit frames", () => {
+    expect(formatTimelineTick(0, "frames", 30)).toBe("0");
+    expect(formatTimelineTick(5, "frames", 30)).toBe("150");
+    expect(formatTimelineTick(-5, "frames", 30)).toBe("-150");
+    expect(formatTimelineTick(20000, "frames", 30)).toBe("600000");
+    expect(formatTimelineTick(-0.02, "frames", 30)).toBe("-1");
+    expect(formatTimelineTick(5, "seconds", 30)).toBe("5.0s");
+  });
+
+  it.each([0.015, 0.5, 15, 90, 450, 1500])("keeps enough label spacing at %s px/sec without changing the underlying grid", (scale) => {
+    const baseStep = 0.5;
+    for (const width of [6, 30, 48, 90]) {
+      const step = timelineRulerStep(baseStep, scale, width);
+      expect(step * scale).toBeGreaterThanOrEqual(width * 1.5 + 12);
+      expect(step / baseStep).toBe(Math.round(step / baseStep));
+      const ticks = visibleTimelineTicks(20000, 0, 320, scale, step, 0);
+      expect(ticks.length).toBeLessThan(20);
+    }
+  });
   it("keeps canonical seconds while formatting frames", () => {
     const canonical = 1.02;
     expect(formatTimelineReadout(canonical, 3, "frames")).toBe("0024 / 0072");

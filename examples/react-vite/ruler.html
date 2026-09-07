@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Ruler layout fixture</title>
+<style>
+body { margin: 0; background: #111; }
+#root { height: 220px; }
+.timeline-editor { height: 100%; }
+.timeline-editor__body { grid-template-columns: 0 minmax(0, 1fr); }
+.timeline-editor__tree-heading, .timeline-editor__tree-viewport { visibility: hidden; }
+.timeline-editor__tick { font-size: 11px; }
+</style>
+<div id="root"></div>
+<script type="module">
+import { createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { TimelineEditor } from "@yohawing/timeline-editor";
+import { createFixtureTimelineDataSource } from "@yohawing/timeline-editor/core";
+import "@yohawing/timeline-editor/styles.css";
+const params = new URLSearchParams(location.search);
+const fps = 30;
+const start = Number(params.get("start") ?? 0) / fps;
+const end = start + Number(params.get("frames") ?? 120) / fps;
+const source = { ...createFixtureTimelineDataSource(), getRange: () => ({ start, end }), getItems: () => [], getKeys: () => [] };
+createRoot(document.getElementById("root")).render(createElement(TimelineEditor, { dataSource: source, frameRate: fps, initialDisplayMode: "frames" }));
+</script></html>
