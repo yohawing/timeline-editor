@@ -81,8 +81,20 @@ export function clampTimelineLoopRange(range: TimeRange | null | undefined, dura
 export function formatTimelineTick(time: number, displayMode: TimelineDisplayMode, frameRate = 24): string {
   const fps = normalizeFrameRate(frameRate);
   return displayMode === "frames"
-    ? String(Math.round(time * fps)).padStart(4, "0")
+    ? String(Math.round(time * fps))
     : `${time.toFixed(1)}s`;
+}
+
+/** Coarsen labels only; grid positions and frame snapping keep their original steps. */
+export function timelineRulerStep(baseStep: number, pixelsPerSecond: number, labelWidth: number): number {
+  if (![baseStep, pixelsPerSecond, labelWidth].every((value) => Number.isFinite(value) && value > 0)) {
+    throw new RangeError("Ruler spacing inputs must be finite and positive");
+  }
+  // The extra half-label also leaves room for labels clamped at viewport edges.
+  const multiplier = Math.max(1, (labelWidth * 1.5 + 12) / pixelsPerSecond / baseStep);
+  const power = 10 ** Math.floor(Math.log10(multiplier));
+  const factor = [1, 2, 5, 10].find((value) => value * power >= multiplier)!;
+  return baseStep * factor * power;
 }
 
 export function visibleTimelineTicks(

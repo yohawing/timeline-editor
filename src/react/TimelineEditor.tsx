@@ -22,6 +22,7 @@ import {
   normalizeFrameRate,
   resolveTimelineSeekTime,
   visibleTimelineTicks,
+  timelineRulerStep,
   type TimeRange,
   type TimelineDataSource,
   type TimelineItem,
@@ -476,8 +477,10 @@ export function TimelineEditor({
   const playheadRef = useRef<HTMLDivElement>(null);
   const readoutRef = useRef<HTMLButtonElement>(null);
   const rowHeightProbeRef = useRef<HTMLDivElement>(null);
+  const tickWidthProbeRef = useRef<HTMLSpanElement>(null);
   const [selectedTarget, setSelectedTarget] = useState<TimelinePlaybackTarget | null>(null);
   const [measuredRowHeight, setMeasuredRowHeight] = useState(0);
+  const [tickCharacterWidth, setTickCharacterWidth] = useState(6);
   /**
    * `--timeline-row-height` is a rem value, so it tracks a host's root
    * font-size (UI scale). Canvas drawing and the virtualized row transform
@@ -516,8 +519,13 @@ export function TimelineEditor({
 
   useEffect(() => {
     const element = rowHeightProbeRef.current;
-    if (!element) return;
-    const update = () => setMeasuredRowHeight(element.getBoundingClientRect().height);
+    const tickProbe = tickWidthProbeRef.current;
+    if (!element || !tickProbe) return;
+    const update = () => {
+      setMeasuredRowHeight(element.getBoundingClientRect().height);
+      const width = tickProbe.getBoundingClientRect().width;
+      if (width > 0) setTickCharacterWidth(width / 8);
+    };
     update();
     if (typeof ResizeObserver === "undefined") {
       window.addEventListener("resize", update);
@@ -525,6 +533,7 @@ export function TimelineEditor({
     }
     const observer = new ResizeObserver(update);
     observer.observe(element);
+    observer.observe(tickProbe);
     return () => observer.disconnect();
   }, []);
 
@@ -996,13 +1005,19 @@ export function TimelineEditor({
     });
   }, [dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
 
+  // Tick labels use a monospace font. Measuring a fixed sample tracks host font
+  // size changes without coupling label layout to whichever ticks were rendered.
+  const tickLabelWidth = Math.max(
+    formatTimelineTick(visibleTimeRange.start, displayMode, fps).length,
+    formatTimelineTick(visibleTimeRange.end, displayMode, fps).length,
+  ) * tickCharacterWidth;
   const ticks = visibleTimelineTicks(
     range.end - range.start,
     scroll.left,
     viewport.width,
     pixelsPerSecond,
-    timelineGridSteps(pixelsPerSecond, fps).labelStep,
-  );
+    timelineRulerStep(timelineGridSteps(pixelsPerSecond, fps).labelStep, pixelsPerSecond, tickLabelWidth),
+  ).filter((tick) => tick * pixelsPerSecond >= scroll.left && tick * pixelsPerSecond <= scroll.left + viewport.width);
   const playbackReadout = variant === "compact"
     ? formatCompactTimelineReadout(time - range.start, duration, displayMode, fps)
     : formatTimelineReadout(time - range.start, duration, displayMode, fps);
@@ -1103,7 +1118,8 @@ export function TimelineEditor({
             onPointerUp={(event) => finishScrub(event, false)}
             onPointerCancel={(event) => finishScrub(event, true)}
           >
-            {ticks.map((tick) => <span className="timeline-editor__tick" key={tick} style={{ left: `${(tick * pixelsPerSecond) - scroll.left}px` }}>{formatTimelineTick(tick + range.start, displayMode, fps)}</span>)}
+            <span ref={tickWidthProbeRef} className="timeline-editor__tick timeline-editor__tick--measure" aria-hidden="true">00000000</span>
+            {ticks.map((tick) => <span className="timeline-editor__tick" key={tick} style={{ left: `${Math.max(tickLabelWidth / 2, Math.min(viewport.width - tickLabelWidth / 2, (tick * pixelsPerSecond) - scroll.left))}px` }}>{formatTimelineTick(tick + range.start, displayMode, fps)}</span>)}
             <div
               className="timeline-editor__loop-lane"
               aria-label="Loop range"

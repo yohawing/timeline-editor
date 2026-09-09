@@ -22,10 +22,12 @@ test("supports compact variant, FPS formatting and display switch", async ({ pag
 
 test("updates Canvas layout when zoom changes", async ({ page }) => {
   await page.goto("/");
-  const zoom = page.getByRole("slider", { name: "Timeline zoom" });
+  const ruler = page.locator(".timeline-editor__ruler");
   const content = page.locator(".timeline-editor__content");
   const before = await content.evaluate((element) => element.getBoundingClientRect().width);
-  await zoom.fill("90");
+  const bounds = (await ruler.boundingBox())!;
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 4);
+  await page.mouse.wheel(0, 500);
   await expect.poll(() => content.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(before);
 });
 
