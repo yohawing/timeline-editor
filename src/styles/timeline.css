@@ -372,11 +372,40 @@
   grid-column: 2; grid-row: 1 / 3; min-width: 0; min-height: 0;
   display: flex; flex-direction: column;
   border-left: 1px solid var(--timeline-divider); background: var(--timeline-surface-2);
-  font-size: .875rem;
+  font-size: .625rem;
 }
-.timeline-editor__sidebar-title { margin: 0; padding: .75rem; font-size: .875rem; border-bottom: 1px solid var(--timeline-divider); }
-.timeline-editor__sidebar-content { min-height: 0; overflow: auto; padding: .75rem; }
+.timeline-editor__sidebar-title { margin: 0; padding: .375rem .5rem; font-size: .625rem; border-bottom: 1px solid var(--timeline-divider); }
+.timeline-editor__sidebar-content { min-height: 0; overflow: auto; padding: .5rem; }
 @media (max-width: 900px) {
   .timeline-editor--with-sidebar { grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--timeline-toolbar-height) minmax(180px, 1fr) minmax(0, 1fr); }
   .timeline-editor__sidebar { grid-column: 1; grid-row: 3; border-left: 0; border-top: 1px solid var(--timeline-divider); }
 }
+
+/* Scoped inspector primitives use the same scale and colors as the toolbar. */
+.timeline-editor { padding: 0; border: 0; border-radius: 0; line-height: 1.4; }
+.timeline-editor > .timeline-editor__header { margin: 0; }
+.timeline-editor__sidebar :is(button, input, select, textarea) {
+  box-sizing: border-box; font: inherit; color: var(--timeline-text);
+  min-height: var(--timeline-control-height); padding: .125rem .375rem;
+  border: 1px solid var(--timeline-divider); border-radius: .1875rem;
+  background: var(--timeline-surface-0); line-height: 1.4;
+}
+.timeline-editor__sidebar button { cursor: pointer; background: var(--timeline-surface-3); }
+.timeline-editor__sidebar button:not(:disabled):hover { background: var(--timeline-accent-soft); }
+.timeline-editor__sidebar button:disabled { opacity: .45; cursor: default; }
+.timeline-editor__sidebar :is(button, input, select, textarea):focus-visible { outline: 1px solid var(--timeline-accent); outline-offset: 1px; }
+.timeline-editor__inspector :is(input, select, textarea) { width: 100%; min-width: 0; }
+.timeline-editor__inspector label { display: grid; gap: .25rem; margin: .5rem 0; }
+.timeline-editor__inspector p { margin: .5rem 0; color: var(--timeline-text-muted); }
+.timeline-editor__inspector-actions { display: flex; flex-wrap: wrap; gap: .25rem; }
+.timeline-editor__inspector fieldset { min-width: 0; margin: .75rem 0 0; padding: .5rem; border: 1px solid var(--timeline-divider); }
+.timeline-editor__inspector legend { padding: 0 .25rem; }
+.timeline-editor__inspector fieldset > * { margin-bottom: .25rem; }
+.timeline-editor__track-actions { display: flex; gap: .125rem; margin-left: auto; padding-right: .25rem; }
+.timeline-editor__track-actions button {
+  font: inherit; padding: 0 .25rem; border: 1px solid var(--timeline-divider); border-radius: .125rem;
+  color: var(--timeline-text); background: var(--timeline-surface-3); line-height: 1.4; cursor: pointer;
+}
+.timeline-editor__track-actions button:not(:disabled):hover { background: var(--timeline-accent-soft); }
+.timeline-editor__track-actions button[aria-pressed="true"] { background: var(--timeline-accent); color: var(--timeline-text); }
+.timeline-editor__row-label { flex: 1; }

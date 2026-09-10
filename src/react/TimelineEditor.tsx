@@ -276,7 +276,7 @@ function drawItem(
     context.stroke();
     context.save();
     context.beginPath();
-    context.rect(x + 7 * s, rowY + 4 * s, Math.max(0, width - 14 * s), 18 * s);
+    context.rect(x + 1, rowY + 4 * s, Math.max(0, width - 2), 18 * s);
     context.clip();
     const waveform = item.waveform;
     if (waveform && Number.isFinite(waveform.sampleDuration) && waveform.sampleDuration > 0) {
@@ -290,16 +290,16 @@ function drawItem(
         let peak = 0;
         for (let j = i; j < Math.min(i + step, waveform.peaks.length); j++) peak = Math.max(peak, waveform.peaks[j]);
         const px = timeToX(time);
-        const height = Math.min(1, Math.max(0, peak)) * 4 * s;
-        context.moveTo(px, rowY + 17 * s - height);
-        context.lineTo(px, rowY + 17 * s + height);
+        const height = Math.min(1, Math.max(0, peak)) * 9 * s;
+        context.moveTo(px, rowY + 13 * s - height);
+        context.lineTo(px, rowY + 13 * s + height);
       }
       context.stroke();
     }
     context.fillStyle = "rgba(255,255,255,.9)";
-    context.font = `500 ${(waveform ? 8 : 10) * s}px Inter, Segoe UI, sans-serif`;
+    context.font = `500 ${10 * s}px Inter, Segoe UI, sans-serif`;
     context.textBaseline = "middle";
-    context.fillText(item.label, x + 8 * s, rowY + (waveform ? 9 : 13) * s);
+    context.fillText(item.label, x + 8 * s, rowY + 13 * s);
     context.restore();
     return;
   }
