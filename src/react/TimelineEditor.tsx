@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useId,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -14,6 +15,9 @@ import {
 } from "react";
 import {
   clampTimelineLoopRange,
+  proposeTimelineItemEdit,
+  type TimelineItemEdit,
+  type TimelineEditMode,
   clampTimelineTime,
   createViewTransform,
   formatCompactTimelineReadout,
@@ -96,6 +100,16 @@ export interface TimelineEditorSlots {
 
 export interface TimelineEditorProps {
   dataSource: TimelineDataSource;
+  /** Optional host content in the built-in right sidebar. */
+  sidebar?: { title: string; content: ReactNode };
+  /** Opt-in item editing. The host owns validation, persistence and history. */
+  selectedItem?: { id: string; kind: TimelineItem["kind"] };
+  renderRowActions?: (row: TimelineRow) => ReactNode;
+  editing?: {
+    onSelect?: (item: TimelineItem) => void;
+    onStart?: () => void;
+    onCommit: (edit: TimelineItemEdit) => void;
+  };
   playbackController?: TimelinePlaybackController;
   frameRate?: number;
   displayMode?: "frames" | "seconds";
@@ -263,8 +277,26 @@ function drawItem(
     context.stroke();
     context.save();
     context.beginPath();
-    context.rect(x + 7 * s, rowY + 4 * s, Math.max(0, width - 14 * s), 18 * s);
+    context.rect(x + 1, rowY + 4 * s, Math.max(0, width - 2), 18 * s);
     context.clip();
+    const waveform = item.waveform;
+    if (waveform && Number.isFinite(waveform.sampleDuration) && waveform.sampleDuration > 0) {
+      context.strokeStyle = "rgba(15,25,35,.7)";
+      context.lineWidth = 1;
+      const step = Math.max(1, Math.ceil(waveform.peaks.length / Math.max(1, width)));
+      context.beginPath();
+      for (let i = 0; i < waveform.peaks.length; i += step) {
+        const time = item.range.start + i * waveform.sampleDuration;
+        if (time >= item.range.end) break;
+        let peak = 0;
+        for (let j = i; j < Math.min(i + step, waveform.peaks.length); j++) peak = Math.max(peak, waveform.peaks[j]);
+        const px = timeToX(time);
+        const height = Math.min(1, Math.max(0, peak)) * 9 * s;
+        context.moveTo(px, rowY + 13 * s - height);
+        context.lineTo(px, rowY + 13 * s + height);
+      }
+      context.stroke();
+    }
     context.fillStyle = "rgba(255,255,255,.9)";
     context.font = `500 ${10 * s}px Inter, Segoe UI, sans-serif`;
     context.textBaseline = "middle";
@@ -283,20 +315,15 @@ function drawItem(
     context.lineTo(x, rowY + 11 * s);
     context.closePath();
     context.fill();
-  } else if (item.kind === "event-cue") {
-    context.beginPath();
-    context.moveTo(x, rowY + 5 * s);
-    context.lineTo(x + 6 * s, rowY + 9 * s);
-    context.lineTo(x + 6 * s, rowY + 17 * s);
-    context.lineTo(x, rowY + 21 * s);
-    context.lineTo(x - 6 * s, rowY + 17 * s);
-    context.lineTo(x - 6 * s, rowY + 9 * s);
-    context.closePath();
-    context.fill();
   } else {
     context.beginPath();
-    context.arc(x, rowY + 13 * s, 5 * s, 0, Math.PI * 2);
+    context.moveTo(x, rowY + 6 * s);
+    context.lineTo(x + 6 * s, rowY + 13 * s);
+    context.lineTo(x, rowY + 20 * s);
+    context.lineTo(x - 6 * s, rowY + 13 * s);
+    context.closePath();
     context.fill();
+    if (item.selected) { context.strokeStyle = "#fff"; context.stroke(); }
   }
   context.fillStyle = "rgba(238,238,244,.78)";
   context.font = `500 ${9 * s}px Inter, Segoe UI, sans-serif`;
@@ -375,6 +402,10 @@ function dispatchSafely(
 
 export function TimelineEditor({
   dataSource,
+  sidebar,
+  renderRowActions,
+  selectedItem,
+  editing,
   playbackController,
   frameRate = 24,
   displayMode: initialDisplayMode = "frames",
@@ -389,6 +420,16 @@ export function TimelineEditor({
   slots,
 }: TimelineEditorProps): ReactElement {
   const fps = normalizeFrameRate(frameRate);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const sidebarId = useId();
+  const [sidebarWidth, setSidebarWidth] = useState<number>();
+  const sidebarResize = useRef<{ pointer: number; x: number; width: number } | null>(null);
+  const resizeSidebar = (element: HTMLElement, width: number) => {
+    const available = element.closest(".timeline-editor")!.getBoundingClientRect().width;
+    setSidebarWidth(Math.max(Math.min(180, available), Math.min(available, width)));
+  };
+  const editDrag = useRef<{ pointer: number; x: number; item: TimelineItem; mode: TimelineEditMode; revision: number; source: TimelineDataSource } | null>(null);
+  const [editPreview, setEditPreview] = useState<TimelineItemEdit | null>(null);
   const revision = useSyncExternalStore(
     useCallback((listener) => dataSource.subscribe(listener), [dataSource]),
     useCallback(() => dataSource.getRevision(), [dataSource]),
@@ -639,8 +680,40 @@ export function TimelineEditor({
     }
   }, [commandTarget, fps, onDiagnostic, pixelsPerSecond, playbackController, playbackSnapshot.available, range.end, range.start, updatePlayhead]);
 
+  const hitItem = useCallback((clientX: number, clientY: number) => {
+    const element = timelineViewportRef.current;
+    if (!element) return;
+    const box = element.getBoundingClientRect();
+    const x = clientX - box.left + element.scrollLeft;
+    const rowIndex = Math.floor((clientY - box.top + element.scrollTop) / rowHeight);
+    const row = dataSource.getRows({ start: rowIndex, count: 1 })[0];
+    const hitTime = range.start + x / pixelsPerSecond;
+    const items = row && !row.locked ? dataSource.getItems({ rowIds: [row.id], range: { start: hitTime - 8 / pixelsPerSecond, end: hitTime + 8 / pixelsPerSecond } }) : [];
+    return [...items].reverse().find(item => item.kind === "clip"
+      ? hitTime >= item.range.start && hitTime <= item.range.end
+      : Math.abs(item.time - hitTime) * pixelsPerSecond <= 8);
+  }, [dataSource, range.start, pixelsPerSecond, rowHeight]);
+
   const onPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    if (editing && event.currentTarget === timelineViewportRef.current) {
+      const element = event.currentTarget;
+      const item = hitItem(event.clientX, event.clientY);
+      const box = element.getBoundingClientRect();
+      const hitTime = range.start + (event.clientX - box.left + element.scrollLeft) / pixelsPerSecond;
+      if (item) {
+        const mode: TimelineEditMode = item.kind !== "clip" ? "move"
+          : Math.abs(hitTime - item.range.start) * pixelsPerSecond < 6 ? "resize-start"
+          : Math.abs(hitTime - item.range.end) * pixelsPerSecond < 6 ? "resize-end" : "move";
+        setEditPreview(null);
+        editDrag.current = { pointer: event.pointerId, x: event.clientX, item, mode, revision, source: dataSource };
+        element.setPointerCapture(event.pointerId);
+        element.focus();
+        editing.onSelect?.(item);
+        editing.onStart?.();
+        return;
+      }
+    }
     pointerIdRef.current = event.pointerId;
     scrubOriginRef.current = time;
     scrubPreviewRef.current = time;
@@ -651,14 +724,31 @@ export function TimelineEditor({
       dispatchSafely(playbackController, { type: "pause", target: commandTarget }, onDiagnostic);
     }
     seekFromClientX(event.clientX);
-  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, playbackSnapshot.playing, seekFromClientX, time]);
+  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, playbackSnapshot.playing, seekFromClientX, time, editing, hitItem, dataSource, pixelsPerSecond, range.start, rowHeight, revision]);
 
   const onPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = editDrag.current;
+    if (drag && drag.pointer === event.pointerId) {
+      try { setEditPreview(proposeTimelineItemEdit(drag.item, drag.mode, (event.clientX - drag.x) / pixelsPerSecond, range, fps)); }
+      catch (error) { onDiagnostic?.({ level: "error", source: "timeline", message: "Cannot edit item", error }); }
+      return;
+    }
     if (pointerIdRef.current !== event.pointerId) return;
     seekFromClientX(event.clientX);
-  }, [seekFromClientX]);
+  }, [seekFromClientX, pixelsPerSecond, range, fps, onDiagnostic]);
 
   const finishScrub = useCallback((event: ReactPointerEvent<HTMLDivElement>, cancelled: boolean) => {
+    const drag = editDrag.current;
+    if (drag && drag.pointer === event.pointerId) {
+      editDrag.current = null;
+      setEditPreview(null);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      if (!cancelled && editing && dataSource === drag.source && revision === drag.revision && Math.abs(event.clientX - drag.x) > 2) {
+        try { editing.onCommit(proposeTimelineItemEdit(drag.item, drag.mode, (event.clientX - drag.x) / pixelsPerSecond, range, fps)); }
+        catch (error) { onDiagnostic?.({ level: "error", source: "timeline", message: "Item edit rejected", error }); }
+      }
+      return;
+    }
     if (pointerIdRef.current !== event.pointerId) return;
     if (cancelled) {
       const origin = scrubOriginRef.current;
@@ -678,7 +768,7 @@ export function TimelineEditor({
     pointerIdRef.current = null;
     setScrubbing(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, updatePlayhead]);
+  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, updatePlayhead, editing, dataSource, revision, pixelsPerSecond, range, fps]);
 
   /** Seek transport (skip-to-start/end, frame step) shares scrub's dispatch-or-local-set split. */
   const seekTo = useCallback((nextTime: number) => {
@@ -701,6 +791,14 @@ export function TimelineEditor({
    * arrow keys in an unrelated input elsewhere in the host app is untouched.
    */
   const onViewportKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape" && editDrag.current) {
+      const pointer = editDrag.current.pointer;
+      editDrag.current = null;
+      setEditPreview(null);
+      if (event.currentTarget.hasPointerCapture(pointer)) event.currentTarget.releasePointerCapture(pointer);
+      event.preventDefault();
+      return;
+    }
     if (duration <= 0) return;
     if (event.key === "ArrowLeft") {
       event.preventDefault();
@@ -791,6 +889,7 @@ export function TimelineEditor({
     const viewportElement = timelineViewportRef.current;
     if (!viewportElement) return;
     const onWheel = (event: WheelEvent) => {
+      if (editDrag.current) { event.preventDefault(); return; }
       if (event.altKey || event.metaKey) return;
       const { duration: clipDuration, width } = viewRef.current;
       const base: ViewRange = pendingViewRef.current ?? { pixelsPerSecond: viewRef.current.pixelsPerSecond, scrollLeft: viewportElement.scrollLeft };
@@ -975,13 +1074,17 @@ export function TimelineEditor({
       context.lineTo(x, scroll.top + viewport.height);
       context.stroke();
     }
-    const items = dataSource.getItems(visibleQuery);
+    const sourceItems = dataSource.getItems(visibleQuery);
+    const preview = editPreview && editDrag.current?.source === dataSource && editDrag.current.revision === revision ? editPreview.next : null;
+    const items = preview
+      ? [...sourceItems.filter(item => item.id !== preview.id || item.kind !== preview.kind), { ...preview, selected: true }]
+      : sourceItems;
     const keys = dataSource.getKeys(visibleQuery);
     const columns = dataSource.getKeyColumns?.(visibleQuery, pixelsPerSecond) ?? [];
     const clippedRows = new Set(rowIds);
     for (const item of items) {
       const rowIndex = rowIndexById.get(item.rowId);
-      if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, item, rowIndex, transform.timeToX, rowHeight);
+      if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, selectedItem ? { ...item, selected: item.id === selectedItem.id && item.kind === selectedItem.kind } : item, rowIndex, transform.timeToX, rowHeight);
     }
     if (columns.length > 0) {
       for (const column of columns) {
@@ -1003,7 +1106,7 @@ export function TimelineEditor({
       keysPainted: columns.length > 0 ? columns.length : keys.length,
       devicePixelRatio: dpr,
     });
-  }, [dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
+  }, [selectedItem?.id, selectedItem?.kind, editPreview, dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
 
   // Tick labels use a monospace font. Measuring a fixed sample tracks host font
   // size changes without coupling label layout to whichever ticks were rendered.
@@ -1040,7 +1143,7 @@ export function TimelineEditor({
   } : undefined;
 
   return (
-    <section className={rootClassName} aria-label="Timeline editor" style={{ "--timeline-row-zoom": rowZoom } as CSSProperties}>
+    <section className={`${rootClassName}${sidebar ? " timeline-editor--with-sidebar" : ""}`} aria-label="Timeline editor" style={{ "--timeline-row-zoom": rowZoom } as CSSProperties}>
       <div ref={rowHeightProbeRef} className="timeline-editor__row-height-probe" aria-hidden="true" />
       <header className="timeline-editor__header">
         <div className="timeline-editor__toolbar">
@@ -1089,6 +1192,7 @@ export function TimelineEditor({
             <span className="timeline-editor__fps">{fps} fps</span>
           )}
           <div className="timeline-editor__slot timeline-editor__slot--end">{slots?.toolbarEnd}</div>
+          {sidebar && <button type="button" className="timeline-editor__button timeline-editor__sidebar-toggle" aria-label={`Toggle ${sidebar.title}`} aria-expanded={sidebarOpen} aria-controls={sidebarId} onClick={() => setSidebarOpen(open => !open)} title={sidebar.title}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16M17 8h2M17 12h2M17 16h2"/></svg></button>}
         </div>
       </header>
       <div className="timeline-editor__body">
@@ -1097,7 +1201,7 @@ export function TimelineEditor({
           <div className="timeline-editor__tree-content" style={{ height: totalHeight }}>
             {rows.map((row, index) => {
               const target = rowTargets.get(row.id);
-              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} rowHeight={rowHeight} />;
+              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} rowHeight={rowHeight} actions={renderRowActions?.(row)} />;
             })}
             {rowCount === 0 && <div className="timeline-editor__empty">{slots?.emptyState ?? "No timeline tracks"}</div>}
           </div>
@@ -1117,6 +1221,7 @@ export function TimelineEditor({
             onPointerMove={onPointerMove}
             onPointerUp={(event) => finishScrub(event, false)}
             onPointerCancel={(event) => finishScrub(event, true)}
+            onLostPointerCapture={(event) => { if (editDrag.current) finishScrub(event, true); }}
           >
             <span ref={tickWidthProbeRef} className="timeline-editor__tick timeline-editor__tick--measure" aria-hidden="true">00000000</span>
             {ticks.map((tick) => <span className="timeline-editor__tick" key={tick} style={{ left: `${Math.max(tickLabelWidth / 2, Math.min(viewport.width - tickLabelWidth / 2, (tick * pixelsPerSecond) - scroll.left))}px` }}>{formatTimelineTick(tick + range.start, displayMode, fps)}</span>)}
@@ -1137,12 +1242,17 @@ export function TimelineEditor({
             tabIndex={0}
             role="application"
             aria-label="Timeline scrubber"
+            onDoubleClick={event => {
+              const item = hitItem(event.clientX, event.clientY);
+              if (item && sidebar) { editing?.onSelect?.(item); setSidebarOpen(true); }
+            }}
             onScroll={onScroll}
             onKeyDown={onViewportKeyDown}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={(event) => finishScrub(event, false)}
             onPointerCancel={(event) => finishScrub(event, true)}
+            onLostPointerCapture={(event) => { if (editDrag.current) finishScrub(event, true); }}
             onPointerLeave={(event) => { if (pointerIdRef.current === event.pointerId && !event.currentTarget.hasPointerCapture(event.pointerId)) finishScrub(event, true); }}
           >
             <div className="timeline-editor__content" style={{ width: totalWidth, height: totalHeight }} />
@@ -1193,11 +1303,38 @@ export function TimelineEditor({
           </div>
         </div>
       </div>
+      {sidebar && <aside id={sidebarId} hidden={!sidebarOpen} className="timeline-editor__sidebar" aria-label={sidebar.title} style={sidebarWidth === undefined ? undefined : { width: `min(${sidebarWidth}px, 100%)` }}>
+        <div className="timeline-editor__sidebar-resizer" role="separator" aria-label={`Resize ${sidebar.title}`} aria-orientation="vertical" tabIndex={0}
+          onPointerDown={event => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            sidebarResize.current = { pointer: event.pointerId, x: event.clientX, width: event.currentTarget.parentElement!.getBoundingClientRect().width };
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={event => {
+            const drag = sidebarResize.current;
+            if (drag?.pointer === event.pointerId) resizeSidebar(event.currentTarget, drag.width + drag.x - event.clientX);
+          }}
+          onPointerUp={event => {
+            sidebarResize.current = null;
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+          }}
+          onPointerCancel={() => { const drag = sidebarResize.current; if (drag) setSidebarWidth(drag.width); sidebarResize.current = null; }}
+          onLostPointerCapture={() => { sidebarResize.current = null; }}
+          onKeyDown={event => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            resizeSidebar(event.currentTarget, event.currentTarget.parentElement!.getBoundingClientRect().width + (event.key === "ArrowLeft" ? 16 : -16));
+          }} />
+        <div className="timeline-editor__sidebar-heading"><h2 className="timeline-editor__sidebar-title">{sidebar.title}</h2><button type="button" className="timeline-editor__button" aria-label={`Close ${sidebar.title}`} onClick={() => setSidebarOpen(false)}>×</button></div>
+        <div className="timeline-editor__sidebar-content">{sidebar.content}</div>
+      </aside>}
     </section>
   );
 }
 
 function TimelineRowView({
+  actions,
   row,
   index,
   target,
@@ -1205,6 +1342,7 @@ function TimelineRowView({
   onSelect,
   rowHeight,
 }: {
+  actions?: ReactNode;
   row: TimelineRow;
   index: number;
   target?: TimelinePlaybackTarget;
@@ -1231,7 +1369,8 @@ function TimelineRowView({
       <span className="timeline-editor__row-disclosure">{row.kind === "group" ? "▾" : ""}</span>
       <span className="timeline-editor__row-label" style={{ paddingLeft: `${Math.max(0, row.depth) * 10 * (rowHeight / TIMELINE_ROW_HEIGHT)}px` }}>{row.label}</span>
       {row.bindingId && <span className="timeline-editor__row-binding">{String(row.bindingId).replace(/^binding-/, "")}</span>}
-      {row.muted && <span className="timeline-editor__row-state">M</span>}
+      {actions && <span style={{ display: "inline-flex", marginLeft: "auto" }} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>{actions}</span>}
+      {row.muted && !actions && <span className="timeline-editor__row-state">M</span>}
       {row.locked && <span className="timeline-editor__row-state">L</span>}
     </div>
   );
