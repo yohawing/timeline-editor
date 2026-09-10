@@ -178,6 +178,6 @@ export function normalizeTime(value: number): TimeValue {
 export function normalizeTimeRange(range: TimeRange): TimeRange {
   const start = normalizeTime(range.start);
   const end = normalizeTime(range.end);
-  if (start < 0 || end < start) throw new RangeError("Timeline range must satisfy 0 <= start <= end");
+  if (end < start) throw new RangeError("Timeline range must satisfy start <= end");
   return { start, end };
 }

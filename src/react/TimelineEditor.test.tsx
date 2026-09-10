@@ -68,6 +68,21 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("TimelineEditor transport and interaction boundary", () => {
+  it("queries negative key times without changing row indexing", () => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(300);
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(200);
+    const data = source();
+    const getRows=vi.fn(data.getRows);
+    const getKeys=vi.fn(data.getKeys);
+    const getItems=vi.fn(data.getItems);
+    render(<TimelineEditor dataSource={{...data,getRange:()=>({start:-2,end:3}),getRows,getKeys,getItems}} />);
+    expect(getRows.mock.calls[0][0].start).toBe(0);
+    expect(getKeys.mock.calls.at(-1)?.[0].range.start).toBe(-2);
+    expect(getItems.mock.calls.at(-1)?.[0].range.start).toBe(-2);
+    expect(getKeys.mock.calls.at(-1)?.[0].rowIds).toEqual([rowId]);
+    width.mockRestore();
+    height.mockRestore();
+  });
   it("keeps transport disabled without a controller", () => {
     render(<TimelineEditor dataSource={source()} />);
     expect((screen.getByRole("button", { name: "Play" }) as HTMLButtonElement).disabled).toBe(true);

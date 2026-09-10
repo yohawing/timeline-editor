@@ -151,7 +151,7 @@ function formatTimelineRate(rate: number): string {
 
 function safeRange(dataSource: TimelineDataSource): { start: number; end: number } {
   const range = dataSource.getRange();
-  const start = Number.isFinite(range.start) ? Math.max(0, range.start) : 0;
+  const start = Number.isFinite(range.start) ? range.start : 0;
   const end = Number.isFinite(range.end) ? Math.max(start, range.end) : start;
   return { start, end };
 }
@@ -181,22 +181,24 @@ function normalizePlaybackSnapshot(value: unknown): TimelinePlaybackSnapshot {
   if (!value || typeof value !== "object") return EMPTY_PLAYBACK;
   const raw = value as Partial<Record<keyof TimelinePlaybackSnapshot, unknown>>;
   const durationIsValid = typeof raw.duration === "number" && Number.isFinite(raw.duration) && raw.duration >= 0;
-  const timeIsValid = typeof raw.time === "number" && Number.isFinite(raw.time) && raw.time >= 0;
+  const timeIsValid = typeof raw.time === "number" && Number.isFinite(raw.time);
   const targetIsValid = raw.target === undefined || raw.target === null || isPlaybackTarget(raw.target);
   const available = raw.available === true && durationIsValid && timeIsValid && targetIsValid;
   const duration = durationIsValid ? raw.duration as number : 0;
-  const time = available ? clampTimelineTime(raw.time as number, duration) : 0;
+  const range = isFiniteTimeRange(raw.range) && raw.range.start <= raw.range.end ? raw.range : { start: 0, end: duration };
+  const time = available ? clampTimelineTime(raw.time as number, range) : 0;
   const sampledAtUnixMs = typeof raw.sampledAtUnixMs === "number" && Number.isFinite(raw.sampledAtUnixMs) && raw.sampledAtUnixMs >= 0
     ? raw.sampledAtUnixMs
     : undefined;
   const rate = available && typeof raw.rate === "number" && Number.isFinite(raw.rate) && raw.rate > 0
     ? raw.rate
     : undefined;
-  const loopRange = available && isFiniteTimeRange(raw.loopRange) ? clampTimelineLoopRange(raw.loopRange, duration) : null;
+  const loopRange = available && isFiniteTimeRange(raw.loopRange) ? clampTimelineLoopRange(raw.loopRange, range) : null;
   return {
     available,
     time,
-    duration: available ? duration : 0,
+    duration: available ? range.end - range.start : 0,
+    range,
     playing: available && raw.playing === true,
     looping: available && raw.looping === true,
     loopRange,
@@ -210,6 +212,7 @@ function samePlaybackSnapshot(left: TimelinePlaybackSnapshot, right: TimelinePla
   return left.available === right.available &&
     left.time === right.time &&
     left.duration === right.duration &&
+    left.range?.start === right.range?.start && left.range?.end === right.range?.end &&
     left.playing === right.playing &&
     left.looping === right.looping &&
     (left.rate ?? 1) === (right.rate ?? 1) &&
@@ -496,8 +499,9 @@ export function TimelineEditor({
   const rowHeight = measuredRowHeight > 0 ? measuredRowHeight : TIMELINE_ROW_HEIGHT;
 
   useEffect(() => {
-    setLocalTime((time) => clampTimelineTime(time, range.end));
-  }, [range.end]);
+    setLocalTime((time) => clampTimelineTime(time, range));
+    setLocalLoopRange((loop) => clampTimelineLoopRange(loop, range));
+  }, [range.start, range.end]);
 
   // A different clip (range) -> back to "fit the whole clip".
   useEffect(() => {
@@ -595,8 +599,8 @@ export function TimelineEditor({
   const updateReadout = useCallback((nextTime: number) => {
     if (readoutRef.current) {
       readoutRef.current.textContent = variant === "compact"
-        ? formatCompactTimelineReadout(nextTime - range.start, duration, displayMode, fps)
-        : formatTimelineReadout(nextTime - range.start, duration, displayMode, fps);
+        ? formatCompactTimelineReadout(nextTime, range, displayMode, fps)
+        : formatTimelineReadout(nextTime, range, displayMode, fps);
     }
   }, [displayMode, duration, fps, range.start, variant]);
 
@@ -624,7 +628,7 @@ export function TimelineEditor({
     if (!element) return;
     const next = resolveTimelineSeekTime(
       range.start + (clientX - element.getBoundingClientRect().left + element.scrollLeft) / pixelsPerSecond,
-      range.end,
+      range,
       "frame-snap",
       fps,
     );
@@ -682,18 +686,18 @@ export function TimelineEditor({
 
   /** Seek transport (skip-to-start/end, frame step) shares scrub's dispatch-or-local-set split. */
   const seekTo = useCallback((nextTime: number) => {
-    const clamped = resolveTimelineSeekTime(nextTime, range.end, "frame-snap", fps);
+    const clamped = resolveTimelineSeekTime(nextTime, range, "frame-snap", fps);
     if (playbackController && playbackSnapshot.available) {
       dispatchSafely(playbackController, { type: "seek", time: clamped, target: commandTarget }, onDiagnostic);
     } else if (!playbackController) {
       setLocalTime(clamped);
     }
-  }, [commandTarget, fps, onDiagnostic, playbackController, playbackSnapshot.available, range.end]);
+  }, [commandTarget, fps, onDiagnostic, playbackController, playbackSnapshot.available, range]);
 
   const stepFrame = useCallback((direction: -1 | 1) => {
-    const stepped = resolveTimelineSeekTime(time + direction / fps, range.end, "frame-snap", fps);
+    const stepped = resolveTimelineSeekTime(time + direction / fps, range, "frame-snap", fps);
     seekTo(stepped);
-  }, [fps, range.end, seekTo, time]);
+  }, [fps, range, seekTo, time]);
 
   /**
    * ArrowLeft/ArrowRight step the playhead one frame while the timeline has
@@ -715,16 +719,16 @@ export function TimelineEditor({
     if (playbackController && playbackSnapshot.available) {
       dispatchSafely(playbackController, { type: "setLoopRange", range: next, target: commandTarget }, onDiagnostic);
     } else if (!playbackController) {
-      setLocalLoopRange(clampTimelineLoopRange(next, duration));
+      setLocalLoopRange(clampTimelineLoopRange(next, range));
     }
-  }, [commandTarget, duration, onDiagnostic, playbackController, playbackSnapshot.available]);
+  }, [commandTarget, range, onDiagnostic, playbackController, playbackSnapshot.available]);
 
   const loopTimeFromClientX = useCallback((clientX: number) => {
     const element = timelineViewportRef.current;
     if (!element) return range.start;
     return resolveTimelineSeekTime(
       range.start + (clientX - element.getBoundingClientRect().left + element.scrollLeft) / pixelsPerSecond,
-      range.end,
+      range,
       "frame-snap",
       fps,
     );
@@ -752,10 +756,10 @@ export function TimelineEditor({
     loopPointerIdRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     setLoopDragPreview((preview) => {
-      if (preview) dispatchLoopRange(clampTimelineLoopRange(preview, duration));
+      if (preview) dispatchLoopRange(clampTimelineLoopRange(preview, range));
       return null;
     });
-  }, [dispatchLoopRange, duration]);
+  }, [dispatchLoopRange, range]);
 
   const clearLoopRange = useCallback((event: { stopPropagation(): void }) => {
     event.stopPropagation();
@@ -962,11 +966,11 @@ export function TimelineEditor({
     // brighter so the rhythm stays readable. Iterated by index (not by
     // accumulating a float step) so frame lines land exactly on frames.
     const { gridStep, frameGrid } = timelineGridSteps(pixelsPerSecond, fps);
-    const firstIndex = Math.max(0, Math.floor((visibleTimeRange.start - range.start) / gridStep));
-    const lastIndex = Math.ceil((Math.min(range.end, visibleTimeRange.end) - range.start) / gridStep);
+    const firstIndex = Math.ceil(visibleTimeRange.start / gridStep);
+    const lastIndex = Math.floor(Math.min(range.end, visibleTimeRange.end) / gridStep);
     const transform = createViewTransform(range.start, pixelsPerSecond);
     for (let index = firstIndex; index <= lastIndex; index += 1) {
-      const gridTime = range.start + index * gridStep;
+      const gridTime = index * gridStep;
       const x = Math.round(transform.timeToX(gridTime)) + .5;
       const onSecond = Math.abs(gridTime - Math.round(gridTime)) < gridStep * .01;
       context.strokeStyle = onSecond ? "rgba(255,255,255,.16)" : frameGrid ? "rgba(255,255,255,.085)" : "rgba(255,255,255,.045)";
@@ -1012,15 +1016,15 @@ export function TimelineEditor({
     formatTimelineTick(visibleTimeRange.end, displayMode, fps).length,
   ) * tickCharacterWidth;
   const ticks = visibleTimelineTicks(
-    range.end - range.start,
+    range,
     scroll.left,
     viewport.width,
     pixelsPerSecond,
     timelineRulerStep(timelineGridSteps(pixelsPerSecond, fps).labelStep, pixelsPerSecond, tickLabelWidth),
-  ).filter((tick) => tick * pixelsPerSecond >= scroll.left && tick * pixelsPerSecond <= scroll.left + viewport.width);
+  ).filter((tick) => (tick - range.start) * pixelsPerSecond >= scroll.left && (tick - range.start) * pixelsPerSecond <= scroll.left + viewport.width);
   const playbackReadout = variant === "compact"
-    ? formatCompactTimelineReadout(time - range.start, duration, displayMode, fps)
-    : formatTimelineReadout(time - range.start, duration, displayMode, fps);
+    ? formatCompactTimelineReadout(time, range, displayMode, fps)
+    : formatTimelineReadout(time, range, displayMode, fps);
   const rootClassName = ["timeline-editor", `timeline-editor--${variant}`, scrubbing ? "is-scrubbing" : "", className ?? ""].filter(Boolean).join(" ");
 
   type UntargetedPlaybackCommand =
@@ -1119,7 +1123,7 @@ export function TimelineEditor({
             onPointerCancel={(event) => finishScrub(event, true)}
           >
             <span ref={tickWidthProbeRef} className="timeline-editor__tick timeline-editor__tick--measure" aria-hidden="true">00000000</span>
-            {ticks.map((tick) => <span className="timeline-editor__tick" key={tick} style={{ left: `${Math.max(tickLabelWidth / 2, Math.min(viewport.width - tickLabelWidth / 2, (tick * pixelsPerSecond) - scroll.left))}px` }}>{formatTimelineTick(tick + range.start, displayMode, fps)}</span>)}
+            {ticks.map((tick) => <span className="timeline-editor__tick" key={tick} style={{ left: `${Math.max(tickLabelWidth / 2, Math.min(viewport.width - tickLabelWidth / 2, ((tick - range.start) * pixelsPerSecond) - scroll.left))}px` }}>{formatTimelineTick(tick, displayMode, fps)}</span>)}
             <div
               className="timeline-editor__loop-lane"
               aria-label="Loop range"
