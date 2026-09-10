@@ -1,4 +1,4 @@
-import { StrictMode, useMemo } from "react";
+import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { TimelineEditor } from "@yohawing/timeline-editor";
 import {
@@ -29,6 +29,7 @@ function createMalformedPlaybackController(): TimelinePlaybackController {
 
 function Example(): JSX.Element {
   const params = new URLSearchParams(window.location.search);
+  const [theme, setTheme] = useState<"dark" | "light">(params.get("theme") === "light" ? "light" : "dark");
   const stress = params.get("stress") === "1";
   const variant = params.get("variant") === "compact" ? "compact" : "full";
   const fps = Number(params.get("fps") ?? 24);
@@ -49,7 +50,7 @@ function Example(): JSX.Element {
     <main className="example-shell">
       <header className="example-heading">
         <div><strong>Timeline Editor</strong><span>standalone projection example</span></div>
-        <span>React + Canvas · no Tauri runtime</span>
+        <label>Theme <select aria-label="Theme" value={theme} onChange={event => setTheme(event.target.value as "light" | "dark")}><option value="dark">Dark</option><option value="light">Light</option></select></label>
       </header>
       <div className="example-editor">
         <TimelineEditor
@@ -57,6 +58,8 @@ function Example(): JSX.Element {
           playbackController={playbackController}
           frameRate={Number.isFinite(fps) && fps > 0 ? fps : 24}
           variant={variant}
+          theme={theme}
+          sidebar={{ title: "Properties", content: <label>Name<input defaultValue="Example" /></label> }}
           slots={{ toolbarEnd: <span className="example-badge">local transport</span> }}
           onDiagnostic={(diagnostic) => console.warn(diagnostic.message, diagnostic.error)}
           onPerformanceSummary={(summary) => {

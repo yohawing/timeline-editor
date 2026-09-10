@@ -96,3 +96,13 @@ Pass `sidebar={{ title: "Properties", content: <YourInspector /> }}` to render a
 The sidebar form controls follow the editor's compact font and control-height tokens. Use `timeline-editor__inspector` for field layout and `timeline-editor__inspector-actions` for action groups. Host-specific inspector styles are unnecessary. Waveforms fill the clip band with labels painted over them.
 
 The sidebar toggle uses an inline SVG icon. Drag the sidebar's left edge to resize it (minimum 180px, capped to editor width); its width persists while mounted. The separator also supports Left/Right arrow keys. Double-clicking a clip or cue selects it through `editing.onSelect` and opens the inspector. The track viewport does not draw a full-area keyboard focus outline; individual controls retain focus indicators.
+
+### Color themes
+
+Pass `theme="light"` to use the light palette for the toolbar, ruler, tracks, Canvas items and inspector. The default is `theme="dark"`, preserving existing hosts. Changing the prop repaints the existing Canvas without resetting playback, selection or the view range. Themes are scoped per editor instance via `data-theme`.
+
+```tsx
+<TimelineEditor dataSource={dataSource} theme="light" />
+```
+
+The existing `--timeline-*` CSS properties remain available for host overrides; Canvas colors use `--timeline-canvas-*` properties read at paint time. Clip colors remain host-owned, with contrasting label text chosen for light mode. The example has a Theme selector and also accepts `?theme=light`.

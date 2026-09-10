@@ -114,6 +114,8 @@ export interface TimelineEditorProps {
   frameRate?: number;
   displayMode?: "frames" | "seconds";
   variant?: "compact" | "full";
+  /** Color scheme for both DOM controls and Canvas. Defaults to dark. */
+  theme?: "dark" | "light";
   /**
    * Whether TimelineEditor renders its own "Timeline" title strip. Defaults to
    * true (current behavior). Set false when a host already provides an
@@ -252,12 +254,47 @@ function roundedRect(
   context.closePath();
 }
 
+type CanvasColors = Record<string, string>;
+function canvasColors(element: HTMLElement): CanvasColors {
+  const style = getComputedStyle(element.closest('.timeline-editor')!);
+  const defaults: CanvasColors = {
+    "row-divider": "rgba(255,255,255,.055)",
+    "group": "#22242d",
+    "row-even": "#1c1e25",
+    "row-odd": "#191b21",
+    "grid-major": "rgba(255,255,255,.16)",
+    "grid-frame": "rgba(255,255,255,.085)",
+    "grid-minor": "rgba(255,255,255,.045)",
+    "selection": "#f1f3ff",
+    "clip-border": "rgba(255,255,255,.16)",
+    "label": "rgba(238,238,244,.78)",
+    "key": "rgba(230,232,255,.78)",
+    "key-selected": "#fff",
+    "key-border": "rgba(24,24,31,.9)",
+    "column": "#e6e8ff",
+    "waveform": "rgba(15,25,35,.7)"
+};
+  return Object.fromEntries(Object.entries(defaults).map(([name, fallback]) => [name, style.getPropertyValue(`--timeline-canvas-${name}`).trim() || fallback]));
+}
+
+// Canvas normalizes ordinary CSS colors to hex or rgb. Preserve the host's
+// clip color while choosing legible text on its translucent light-mode fill.
+function lightClipText(normalized: string): string {
+  const hex = /^#([0-9a-f]{6})$/i.exec(normalized);
+  const rgb = hex ? [0, 2, 4].map(i => parseInt(hex[1].slice(i, i + 2), 16)) : normalized.match(/[\d.]+/g)?.slice(0, 3).map(Number);
+  if (!rgb || rgb.length !== 3) return '#17212b';
+  const linear = rgb.map(v => { const c = (v * .82 + 245 * .18) / 255; return c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4; });
+  return .2126 * linear[0] + .7152 * linear[1] + .0722 * linear[2] > .179 ? '#17212b' : '#fff';
+}
+
 function drawItem(
   context: CanvasRenderingContext2D,
   item: TimelineItem,
   rowIndex: number,
   timeToX: (time: number) => number,
   rowHeight: number,
+  colors: CanvasColors,
+  light = false,
 ): void {
   const rowY = rowIndex * rowHeight;
   // Every pixel constant below was drawn for the 26px design row; scale them
@@ -270,9 +307,10 @@ function drawItem(
     roundedRect(context, x + 1, rowY + 4 * s, width - 2, 18 * s, 3 * s);
     context.globalAlpha = 0.82;
     context.fillStyle = item.color;
+    const clipText = light ? lightClipText(context.fillStyle) : "rgba(255,255,255,.9)";
     context.fill();
     context.globalAlpha = 1;
-    context.strokeStyle = item.selected ? "#f1f3ff" : "rgba(255,255,255,.16)";
+    context.strokeStyle = item.selected ? colors.selection : colors["clip-border"];
     context.lineWidth = item.selected ? 1.5 : 1;
     context.stroke();
     context.save();
@@ -281,7 +319,7 @@ function drawItem(
     context.clip();
     const waveform = item.waveform;
     if (waveform && Number.isFinite(waveform.sampleDuration) && waveform.sampleDuration > 0) {
-      context.strokeStyle = "rgba(15,25,35,.7)";
+      context.strokeStyle = colors.waveform;
       context.lineWidth = 1;
       const step = Math.max(1, Math.ceil(waveform.peaks.length / Math.max(1, width)));
       context.beginPath();
@@ -297,7 +335,7 @@ function drawItem(
       }
       context.stroke();
     }
-    context.fillStyle = "rgba(255,255,255,.9)";
+    context.fillStyle = clipText;
     context.font = `500 ${10 * s}px Inter, Segoe UI, sans-serif`;
     context.textBaseline = "middle";
     context.fillText(item.label, x + 8 * s, rowY + 13 * s);
@@ -323,9 +361,9 @@ function drawItem(
     context.lineTo(x - 6 * s, rowY + 13 * s);
     context.closePath();
     context.fill();
-    if (item.selected) { context.strokeStyle = "#fff"; context.stroke(); }
+    if (item.selected) { context.strokeStyle = colors.selection; context.stroke(); }
   }
-  context.fillStyle = "rgba(238,238,244,.78)";
+  context.fillStyle = colors.label;
   context.font = `500 ${9 * s}px Inter, Segoe UI, sans-serif`;
   context.textBaseline = "middle";
   context.fillText(item.label, x + 9 * s, rowY + 13 * s);
@@ -337,6 +375,7 @@ function drawKey(
   rowIndex: number,
   timeToX: (time: number) => number,
   rowHeight: number,
+  colors: CanvasColors,
 ): void {
   const s = rowHeight / TIMELINE_ROW_HEIGHT;
   const x = timeToX(key.time);
@@ -348,9 +387,9 @@ function drawKey(
   context.lineTo(x, y + radius);
   context.lineTo(x - radius, y);
   context.closePath();
-  context.fillStyle = key.selected ? "#fff" : "rgba(230,232,255,.78)";
+  context.fillStyle = key.selected ? colors["key-selected"] : colors.key;
   context.fill();
-  context.strokeStyle = "rgba(24,24,31,.9)";
+  context.strokeStyle = colors["key-border"];
   context.lineWidth = 1;
   context.stroke();
 }
@@ -361,6 +400,7 @@ function drawKeyColumn(
   rowIndex: number,
   timeToX: (time: number) => number,
   rowHeight: number,
+  colors: CanvasColors,
 ): void {
   if (column.count <= 1) {
     drawKey(context, {
@@ -369,17 +409,19 @@ function drawKeyColumn(
       rowId: column.rowId,
       channelId: column.channelId,
       time: column.time,
-    }, rowIndex, timeToX, rowHeight);
+    }, rowIndex, timeToX, rowHeight, colors);
     return;
   }
   const x = Math.round(timeToX(column.time)) + 0.5;
   const y = rowIndex * rowHeight + 13;
-  context.strokeStyle = `rgba(230,232,255,${Math.min(1, .3 + Math.log2(column.count) / 8)})`;
+  context.strokeStyle = colors.column;
+  context.globalAlpha = Math.min(1, .3 + Math.log2(column.count) / 8);
   context.lineWidth = Math.min(4, 1 + Math.log2(column.count) / 3);
   context.beginPath();
   context.moveTo(x, y - 9);
   context.lineTo(x, y + 9);
   context.stroke();
+  context.globalAlpha = 1;
 }
 
 function dispatchSafely(
@@ -410,6 +452,7 @@ export function TimelineEditor({
   frameRate = 24,
   displayMode: initialDisplayMode = "frames",
   variant = "full",
+  theme = "dark",
   frameRateOptions,
   frameRateValue,
   onFrameRateChange,
@@ -1023,6 +1066,7 @@ export function TimelineEditor({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || viewport.width <= 0 || viewport.height <= 0) return;
+    const colors = canvasColors(canvas);
     const startedAt = performance.now();
     const dpr = devicePixelRatio;
     canvas.width = Math.max(1, Math.round(viewport.width * dpr));
@@ -1048,9 +1092,9 @@ export function TimelineEditor({
       const row = rows[index - rowQuery.start];
       if (!row) continue;
       const y = index * rowHeight;
-      context.fillStyle = row.kind === "group" ? "#22242d" : index % 2 === 0 ? "#1c1e25" : "#191b21";
+      context.fillStyle = row.kind === "group" ? colors.group : index % 2 === 0 ? colors["row-even"] : colors["row-odd"];
       context.fillRect(scroll.left, y, viewport.width, rowHeight);
-      context.strokeStyle = "rgba(255,255,255,.055)";
+      context.strokeStyle = colors["row-divider"];
       context.beginPath();
       context.moveTo(scroll.left, y + rowHeight - .5);
       context.lineTo(scroll.left + viewport.width, y + rowHeight - .5);
@@ -1068,7 +1112,7 @@ export function TimelineEditor({
       const gridTime = range.start + index * gridStep;
       const x = Math.round(transform.timeToX(gridTime)) + .5;
       const onSecond = Math.abs(gridTime - Math.round(gridTime)) < gridStep * .01;
-      context.strokeStyle = onSecond ? "rgba(255,255,255,.16)" : frameGrid ? "rgba(255,255,255,.085)" : "rgba(255,255,255,.045)";
+      context.strokeStyle = onSecond ? colors["grid-major"] : frameGrid ? colors["grid-frame"] : colors["grid-minor"];
       context.beginPath();
       context.moveTo(x, scroll.top);
       context.lineTo(x, scroll.top + viewport.height);
@@ -1084,17 +1128,17 @@ export function TimelineEditor({
     const clippedRows = new Set(rowIds);
     for (const item of items) {
       const rowIndex = rowIndexById.get(item.rowId);
-      if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, selectedItem ? { ...item, selected: item.id === selectedItem.id && item.kind === selectedItem.kind } : item, rowIndex, transform.timeToX, rowHeight);
+      if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, selectedItem ? { ...item, selected: item.id === selectedItem.id && item.kind === selectedItem.kind } : item, rowIndex, transform.timeToX, rowHeight, colors, theme === "light");
     }
     if (columns.length > 0) {
       for (const column of columns) {
         const rowIndex = rowIndexById.get(column.rowId);
-        if (rowIndex != null) drawKeyColumn(context, column, rowIndex, transform.timeToX, rowHeight);
+        if (rowIndex != null) drawKeyColumn(context, column, rowIndex, transform.timeToX, rowHeight, colors);
       }
     } else {
       for (const key of keys) {
         const rowIndex = rowIndexById.get(key.rowId);
-        if (rowIndex != null) drawKey(context, key, rowIndex, transform.timeToX, rowHeight);
+        if (rowIndex != null) drawKey(context, key, rowIndex, transform.timeToX, rowHeight, colors);
       }
     }
     context.restore();
@@ -1106,7 +1150,7 @@ export function TimelineEditor({
       keysPainted: columns.length > 0 ? columns.length : keys.length,
       devicePixelRatio: dpr,
     });
-  }, [selectedItem?.id, selectedItem?.kind, editPreview, dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
+  }, [theme, selectedItem?.id, selectedItem?.kind, editPreview, dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
 
   // Tick labels use a monospace font. Measuring a fixed sample tracks host font
   // size changes without coupling label layout to whichever ticks were rendered.
@@ -1143,7 +1187,7 @@ export function TimelineEditor({
   } : undefined;
 
   return (
-    <section className={`${rootClassName}${sidebar ? " timeline-editor--with-sidebar" : ""}`} aria-label="Timeline editor" style={{ "--timeline-row-zoom": rowZoom } as CSSProperties}>
+    <section className={`${rootClassName}${sidebar ? " timeline-editor--with-sidebar" : ""}`} aria-label="Timeline editor" data-theme={theme} style={{ "--timeline-row-zoom": rowZoom } as CSSProperties}>
       <div ref={rowHeightProbeRef} className="timeline-editor__row-height-probe" aria-hidden="true" />
       <header className="timeline-editor__header">
         <div className="timeline-editor__toolbar">
