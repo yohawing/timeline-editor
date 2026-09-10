@@ -262,7 +262,7 @@
   touch-action: none;
   user-select: none;
 }
-.timeline-editor__viewport:focus-visible { outline: 1px solid #5a8fe0; outline-offset: -1px; }
+.timeline-editor__viewport:focus-visible { outline: none; }
 /* Feedback cursor while a scrub drag is in progress, on whichever surface
    (ruler or track viewport) the pointer was pressed on. */
 .timeline-editor.is-scrubbing .timeline-editor__viewport,
@@ -405,3 +405,6 @@
 .timeline-editor__track-actions button:not(:disabled):hover { background: var(--timeline-accent-soft); }
 .timeline-editor__track-actions button[aria-pressed="true"] { background: var(--timeline-accent); color: var(--timeline-text); }
 .timeline-editor__row-label { flex: 1; }
+
+.timeline-editor__sidebar-resizer { position: absolute; left: 0; top: 0; bottom: 0; width: .375rem; cursor: ew-resize; touch-action: none; z-index: 1; }
+.timeline-editor__sidebar-resizer:hover, .timeline-editor__sidebar-resizer:focus-visible { background: var(--timeline-accent-soft); outline: none; }
