@@ -400,6 +400,8 @@ it('opts into item commits and cancels an edit on Escape', () => {
 it('owns optional sidebar content and restores the layout when omitted', () => {
   const data = source();
   const view = render(<TimelineEditor dataSource={data} sidebar={{title: 'Properties', content: <input aria-label="Clip label" defaultValue="hello" />}} />);
+  expect(screen.queryByRole('complementary', {name:'Properties'})).toBeNull();
+  fireEvent.click(screen.getByRole('button', {name:'Toggle Properties'}));
   const sidebar = screen.getByRole('complementary', {name:'Properties'});
   expect(sidebar.closest('.timeline-editor')).toBeTruthy();
   const input = screen.getByRole('textbox', {name:'Clip label'});

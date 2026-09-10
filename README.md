@@ -91,6 +91,6 @@ Clips may provide `waveform: { peaks, sampleDuration }`. Each amplitude represen
 
 ### Built-in sidebar
 
-Pass `sidebar={{ title: "Properties", content: <YourInspector /> }}` to render a right sidebar inside TimelineEditor. The library owns the title, divider, scrolling and layout; the host owns fields and document changes. Omit it to preserve the original full-width layout. Set `--timeline-sidebar-width` (default 18.75rem) to customize width. At viewport widths of 900px or less the sidebar stacks below the timeline and scrolls independently.
+Pass `sidebar={{ title: "Properties", content: <YourInspector /> }}` to render a right sidebar inside TimelineEditor. The library owns the title, toolbar toggle, close button and scrolling; the host owns fields and document changes. The sidebar starts closed and overlays the right edge without resizing the timeline. Set `--timeline-sidebar-width` (default 18.75rem, capped at the editor width) to customize width. Hidden content remains mounted so toggling preserves draft fields.
 
 The sidebar form controls follow the editor's compact font and control-height tokens. Use `timeline-editor__inspector` for field layout and `timeline-editor__inspector-actions` for action groups. Host-specific inspector styles are unnecessary. Waveforms fill the clip band with labels painted over them.

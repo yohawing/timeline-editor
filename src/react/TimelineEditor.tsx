@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useId,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -419,6 +420,8 @@ export function TimelineEditor({
   slots,
 }: TimelineEditorProps): ReactElement {
   const fps = normalizeFrameRate(frameRate);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const sidebarId = useId();
   const editDrag = useRef<{ pointer: number; x: number; item: TimelineItem; mode: TimelineEditMode; revision: number; source: TimelineDataSource } | null>(null);
   const [editPreview, setEditPreview] = useState<TimelineItemEdit | null>(null);
   const revision = useSyncExternalStore(
@@ -1175,6 +1178,7 @@ export function TimelineEditor({
             <span className="timeline-editor__fps">{fps} fps</span>
           )}
           <div className="timeline-editor__slot timeline-editor__slot--end">{slots?.toolbarEnd}</div>
+          {sidebar && <button type="button" className="timeline-editor__button timeline-editor__sidebar-toggle" aria-label={`Toggle ${sidebar.title}`} aria-expanded={sidebarOpen} aria-controls={sidebarId} onClick={() => setSidebarOpen(open => !open)}>{sidebar.title}</button>}
         </div>
       </header>
       <div className="timeline-editor__body">
@@ -1281,8 +1285,8 @@ export function TimelineEditor({
           </div>
         </div>
       </div>
-      {sidebar && <aside className="timeline-editor__sidebar" aria-label={sidebar.title}>
-        <h2 className="timeline-editor__sidebar-title">{sidebar.title}</h2>
+      {sidebar && <aside id={sidebarId} hidden={!sidebarOpen} className="timeline-editor__sidebar" aria-label={sidebar.title}>
+        <div className="timeline-editor__sidebar-heading"><h2 className="timeline-editor__sidebar-title">{sidebar.title}</h2><button type="button" className="timeline-editor__button" aria-label={`Close ${sidebar.title}`} onClick={() => setSidebarOpen(false)}>×</button></div>
         <div className="timeline-editor__sidebar-content">{sidebar.content}</div>
       </aside>}
     </section>
