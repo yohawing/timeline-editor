@@ -395,3 +395,17 @@ it('opts into item commits and cancels an edit on Escape', () => {
   pointer('pointerdown',20);pointer('pointermove',40);fireEvent.keyDown(viewport,{key:'Escape'});pointer('pointerup',40);
   expect(onCommit).toHaveBeenCalledOnce();
 });
+
+
+it('owns optional sidebar content and restores the layout when omitted', () => {
+  const data = source();
+  const view = render(<TimelineEditor dataSource={data} sidebar={{title: 'Properties', content: <input aria-label="Clip label" defaultValue="hello" />}} />);
+  const sidebar = screen.getByRole('complementary', {name:'Properties'});
+  expect(sidebar.closest('.timeline-editor')).toBeTruthy();
+  const input = screen.getByRole('textbox', {name:'Clip label'});
+  fireEvent.change(input, {target:{value:'updated'}});
+  expect((input as HTMLInputElement).value).toBe('updated');
+  view.rerender(<TimelineEditor dataSource={data} />);
+  expect(screen.queryByRole('complementary')).toBeNull();
+  expect(document.querySelector('.timeline-editor--with-sidebar')).toBeNull();
+});

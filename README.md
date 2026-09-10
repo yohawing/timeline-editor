@@ -88,3 +88,7 @@ The verify command also runs Chromium interaction coverage. Install the browser 
 `renderRowActions(row)` can supply host-owned buttons such as Mute/Solo. The host owns their state, accessible labels, grouping and playback semantics; no audio behavior is added to the library.
 
 Clips may provide `waveform: { peaks, sampleDuration }`. Each amplitude represents a uniform source-time bin of `sampleDuration` seconds, starting at the clip start. The Canvas uses symmetric absolute amplitudes, clips at the item boundary, and preserves source duration when the item is resized. The host extracts and caches peaks; no decoding dependency is required.
+
+### Built-in sidebar
+
+Pass `sidebar={{ title: "Properties", content: <YourInspector /> }}` to render a right sidebar inside TimelineEditor. The library owns the title, divider, scrolling and layout; the host owns fields and document changes. Omit it to preserve the original full-width layout. Set `--timeline-sidebar-width` (default 18.75rem) to customize width. At viewport widths of 900px or less the sidebar stacks below the timeline and scrolls independently.

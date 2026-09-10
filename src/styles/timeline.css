@@ -361,3 +361,22 @@
 @media (max-width: 760px) {
   .timeline-editor__fps { display: none; }
 }
+
+/* Optional host inspector, owned and laid out by TimelineEditor. */
+.timeline-editor--with-sidebar {
+  grid-template-columns: minmax(0, 1fr) var(--timeline-sidebar-width, 18.75rem);
+}
+.timeline-editor--with-sidebar > .timeline-editor__header { grid-column: 1; grid-row: 1; }
+.timeline-editor--with-sidebar > .timeline-editor__body { grid-column: 1; grid-row: 2; }
+.timeline-editor__sidebar {
+  grid-column: 2; grid-row: 1 / 3; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+  border-left: 1px solid var(--timeline-divider); background: var(--timeline-surface-2);
+  font-size: .875rem;
+}
+.timeline-editor__sidebar-title { margin: 0; padding: .75rem; font-size: .875rem; border-bottom: 1px solid var(--timeline-divider); }
+.timeline-editor__sidebar-content { min-height: 0; overflow: auto; padding: .75rem; }
+@media (max-width: 900px) {
+  .timeline-editor--with-sidebar { grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--timeline-toolbar-height) minmax(180px, 1fr) minmax(0, 1fr); }
+  .timeline-editor__sidebar { grid-column: 1; grid-row: 3; border-left: 0; border-top: 1px solid var(--timeline-divider); }
+}

@@ -99,6 +99,8 @@ export interface TimelineEditorSlots {
 
 export interface TimelineEditorProps {
   dataSource: TimelineDataSource;
+  /** Optional host content in the built-in right sidebar. */
+  sidebar?: { title: string; content: ReactNode };
   /** Opt-in item editing. The host owns validation, persistence and history. */
   selectedItem?: { id: string; kind: TimelineItem["kind"] };
   renderRowActions?: (row: TimelineRow) => ReactNode;
@@ -399,6 +401,7 @@ function dispatchSafely(
 
 export function TimelineEditor({
   dataSource,
+  sidebar,
   renderRowActions,
   selectedItem,
   editing,
@@ -1123,7 +1126,7 @@ export function TimelineEditor({
   } : undefined;
 
   return (
-    <section className={rootClassName} aria-label="Timeline editor" style={{ "--timeline-row-zoom": rowZoom } as CSSProperties}>
+    <section className={`${rootClassName}${sidebar ? " timeline-editor--with-sidebar" : ""}`} aria-label="Timeline editor" style={{ "--timeline-row-zoom": rowZoom } as CSSProperties}>
       <div ref={rowHeightProbeRef} className="timeline-editor__row-height-probe" aria-hidden="true" />
       <header className="timeline-editor__header">
         <div className="timeline-editor__toolbar">
@@ -1278,6 +1281,10 @@ export function TimelineEditor({
           </div>
         </div>
       </div>
+      {sidebar && <aside className="timeline-editor__sidebar" aria-label={sidebar.title}>
+        <h2 className="timeline-editor__sidebar-title">{sidebar.title}</h2>
+        <div className="timeline-editor__sidebar-content">{sidebar.content}</div>
+      </aside>}
     </section>
   );
 }
