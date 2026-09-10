@@ -381,3 +381,17 @@ describe("TimelineEditor transport and interaction boundary", () => {
     expect(onDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ level: "error", source: "timeline" }));
   });
 });
+
+it('opts into item commits and cancels an edit on Escape', () => {
+  const data = source();
+  const item = { kind: 'clip' as const, id: timelineId<'clip'>('edit-clip'), rowId, label: 'Edit me', color: '#fff', range: { start: 0, end: 10 } };
+  data.getItems = () => [item];
+  const onCommit = vi.fn(); const onSelect = vi.fn();
+  render(<TimelineEditor dataSource={data} editing={{onCommit, onSelect}} />);
+  const viewport = screen.getByRole('application', {name:'Timeline scrubber'});
+  const pointer = (type: string, x: number) => { const event=new Event(type,{bubbles:true});Object.assign(event,{button:0,pointerId:1,clientX:x,clientY:10});fireEvent(viewport,event); };
+  pointer('pointerdown',20); pointer('pointermove',40); pointer('pointerup',40);
+  expect(onSelect).toHaveBeenCalledWith(item); expect(onCommit).toHaveBeenCalledOnce();
+  pointer('pointerdown',20);pointer('pointermove',40);fireEvent.keyDown(viewport,{key:'Escape'});pointer('pointerup',40);
+  expect(onCommit).toHaveBeenCalledOnce();
+});

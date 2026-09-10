@@ -14,6 +14,9 @@ import {
 } from "react";
 import {
   clampTimelineLoopRange,
+  proposeTimelineItemEdit,
+  type TimelineItemEdit,
+  type TimelineEditMode,
   clampTimelineTime,
   createViewTransform,
   formatCompactTimelineReadout,
@@ -96,6 +99,12 @@ export interface TimelineEditorSlots {
 
 export interface TimelineEditorProps {
   dataSource: TimelineDataSource;
+  /** Opt-in item editing. The host owns validation, persistence and history. */
+  editing?: {
+    onSelect?: (item: TimelineItem) => void;
+    onStart?: () => void;
+    onCommit: (edit: TimelineItemEdit) => void;
+  };
   playbackController?: TimelinePlaybackController;
   frameRate?: number;
   displayMode?: "frames" | "seconds";
@@ -375,6 +384,7 @@ function dispatchSafely(
 
 export function TimelineEditor({
   dataSource,
+  editing,
   playbackController,
   frameRate = 24,
   displayMode: initialDisplayMode = "frames",
@@ -389,6 +399,8 @@ export function TimelineEditor({
   slots,
 }: TimelineEditorProps): ReactElement {
   const fps = normalizeFrameRate(frameRate);
+  const editDrag = useRef<{ pointer: number; x: number; item: TimelineItem; mode: TimelineEditMode; revision: number; source: TimelineDataSource } | null>(null);
+  const [editPreview, setEditPreview] = useState<TimelineItemEdit | null>(null);
   const revision = useSyncExternalStore(
     useCallback((listener) => dataSource.subscribe(listener), [dataSource]),
     useCallback(() => dataSource.getRevision(), [dataSource]),
@@ -641,6 +653,29 @@ export function TimelineEditor({
 
   const onPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    if (editing && event.currentTarget === timelineViewportRef.current) {
+      const element = event.currentTarget;
+      const box = element.getBoundingClientRect();
+      const x = event.clientX - box.left + element.scrollLeft;
+      const rowIndex = Math.floor((event.clientY - box.top + element.scrollTop) / rowHeight);
+      const row = dataSource.getRows({ start: rowIndex, count: 1 })[0];
+      const hitTime = range.start + x / pixelsPerSecond;
+      const items = row && !row.locked ? dataSource.getItems({ rowIds: [row.id], range: { start: hitTime - 8 / pixelsPerSecond, end: hitTime + 8 / pixelsPerSecond } }) : [];
+      const item = [...items].reverse().find(item => item.kind === "clip"
+        ? hitTime >= item.range.start && hitTime <= item.range.end
+        : Math.abs(item.time - hitTime) * pixelsPerSecond <= 8);
+      if (item) {
+        const mode: TimelineEditMode = item.kind !== "clip" ? "move"
+          : Math.abs(hitTime - item.range.start) * pixelsPerSecond < 6 ? "resize-start"
+          : Math.abs(hitTime - item.range.end) * pixelsPerSecond < 6 ? "resize-end" : "move";
+        editDrag.current = { pointer: event.pointerId, x: event.clientX, item, mode, revision, source: dataSource };
+        element.setPointerCapture(event.pointerId);
+        element.focus();
+        editing.onSelect?.(item);
+        editing.onStart?.();
+        return;
+      }
+    }
     pointerIdRef.current = event.pointerId;
     scrubOriginRef.current = time;
     scrubPreviewRef.current = time;
@@ -651,14 +686,31 @@ export function TimelineEditor({
       dispatchSafely(playbackController, { type: "pause", target: commandTarget }, onDiagnostic);
     }
     seekFromClientX(event.clientX);
-  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, playbackSnapshot.playing, seekFromClientX, time]);
+  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, playbackSnapshot.playing, seekFromClientX, time, editing, dataSource, pixelsPerSecond, range.start, rowHeight, revision]);
 
   const onPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = editDrag.current;
+    if (drag && drag.pointer === event.pointerId) {
+      try { setEditPreview(proposeTimelineItemEdit(drag.item, drag.mode, (event.clientX - drag.x) / pixelsPerSecond, range, fps)); }
+      catch (error) { onDiagnostic?.({ level: "error", source: "timeline", message: "Cannot edit item", error }); }
+      return;
+    }
     if (pointerIdRef.current !== event.pointerId) return;
     seekFromClientX(event.clientX);
-  }, [seekFromClientX]);
+  }, [seekFromClientX, pixelsPerSecond, range, fps, onDiagnostic]);
 
   const finishScrub = useCallback((event: ReactPointerEvent<HTMLDivElement>, cancelled: boolean) => {
+    const drag = editDrag.current;
+    if (drag && drag.pointer === event.pointerId) {
+      editDrag.current = null;
+      setEditPreview(null);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      if (!cancelled && editing && dataSource === drag.source && revision === drag.revision && Math.abs(event.clientX - drag.x) > 2) {
+        try { editing.onCommit(proposeTimelineItemEdit(drag.item, drag.mode, (event.clientX - drag.x) / pixelsPerSecond, range, fps)); }
+        catch (error) { onDiagnostic?.({ level: "error", source: "timeline", message: "Item edit rejected", error }); }
+      }
+      return;
+    }
     if (pointerIdRef.current !== event.pointerId) return;
     if (cancelled) {
       const origin = scrubOriginRef.current;
@@ -678,7 +730,7 @@ export function TimelineEditor({
     pointerIdRef.current = null;
     setScrubbing(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, updatePlayhead]);
+  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, updatePlayhead, editing, dataSource, revision, pixelsPerSecond, range, fps]);
 
   /** Seek transport (skip-to-start/end, frame step) shares scrub's dispatch-or-local-set split. */
   const seekTo = useCallback((nextTime: number) => {
@@ -701,6 +753,14 @@ export function TimelineEditor({
    * arrow keys in an unrelated input elsewhere in the host app is untouched.
    */
   const onViewportKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape" && editDrag.current) {
+      const pointer = editDrag.current.pointer;
+      editDrag.current = null;
+      setEditPreview(null);
+      if (event.currentTarget.hasPointerCapture(pointer)) event.currentTarget.releasePointerCapture(pointer);
+      event.preventDefault();
+      return;
+    }
     if (duration <= 0) return;
     if (event.key === "ArrowLeft") {
       event.preventDefault();
@@ -1147,6 +1207,11 @@ export function TimelineEditor({
           >
             <div className="timeline-editor__content" style={{ width: totalWidth, height: totalHeight }} />
             <canvas className="timeline-editor__canvas" ref={canvasRef} />
+            {editPreview && <output className="timeline-editor__edit-preview" style={{ position: "absolute", left: scroll.left + 8, top: scroll.top + 8, pointerEvents: "none", background: "#222", zIndex: 2 }}>
+              {editPreview.next.label}: {editPreview.next.kind === "clip"
+                ? `${editPreview.next.range.start.toFixed(3)} – ${editPreview.next.range.end.toFixed(3)}`
+                : editPreview.next.time.toFixed(3)}
+            </output>}
             <div className="timeline-editor__range-action">{slots?.diagnosticAction}</div>
           </div>
           {loopRangeStyle && (
