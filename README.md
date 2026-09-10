@@ -53,7 +53,7 @@ Omit `editing` to retain the default read-only projection. Opt in with callbacks
 />
 ```
 
-Drag an item to move it in time; drag within 6 pixels of either clip edge to resize it. Cues, markers and event cues move without resizing. Locked rows stay read-only. The ruler and empty track space still scrub. `onSelect` and `onStart` run on pointer down; the host decides whether to pause playback. A timing readout previews the proposal, and release after a drag emits one `onCommit`. Escape and pointer cancellation discard the proposal. Changing the data source or its revision during a drag prevents its commit.
+Drag an item to move it in time; drag within 6 pixels of either clip edge to resize it. Cues, markers and event cues move without resizing. Locked rows stay read-only. The ruler and empty track space still scrub. `onSelect` and `onStart` run on pointer down; the host decides whether to pause playback. The Canvas item follows the proposed position/size during the drag, without a floating tooltip, and release emits one `onCommit`. Escape, pointer cancellation and capture loss discard the proposal. Wheel zoom/pan is held while dragging. Changing the data source or its revision during a drag prevents its commit.
 
 The exported core helper `proposeTimelineItemEdit` and `TimelineItemEdit` describe the same operation without mutating the source. Movement deltas snap to `frameRate`, preserving an item's existing fractional offset, and proposals stay within the source time range. Clip resizing keeps the opposite edge and a minimum length of one frame (or the original length for shorter clips).
 
@@ -80,3 +80,11 @@ npm run dev
 `npm run verify` runs the focused Vitest contracts, strict declaration build, Vite library build, standalone example build, and `npm pack --dry-run`.
 
 The verify command also runs Chromium interaction coverage. Install the browser once with `npx playwright install chromium`; the separate `npm run test:perf` reference gate exercises the deterministic 500-row/100,000-key fixture and asserts Canvas paint p95 <= 8ms on the local Chromium reference environment. Git consumers receive a built `dist` through the `prepare` lifecycle script.
+
+### Selection, row actions and waveforms
+
+`selectedItem={{ kind: "clip", id: "my-clip" }}` controls the highlight without replacing the data source (so selection does not invalidate an active drag). Cues and event cues use diamond glyphs.
+
+`renderRowActions(row)` can supply host-owned buttons such as Mute/Solo. The host owns their state, accessible labels, grouping and playback semantics; no audio behavior is added to the library.
+
+Clips may provide `waveform: { peaks, sampleDuration }`. Each amplitude represents a uniform source-time bin of `sampleDuration` seconds, starting at the clip start. The Canvas uses symmetric absolute amplitudes, clips at the item boundary, and preserves source duration when the item is resized. The host extracts and caches peaks; no decoding dependency is required.

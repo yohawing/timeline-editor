@@ -100,6 +100,8 @@ export interface TimelineEditorSlots {
 export interface TimelineEditorProps {
   dataSource: TimelineDataSource;
   /** Opt-in item editing. The host owns validation, persistence and history. */
+  selectedItem?: { id: string; kind: TimelineItem["kind"] };
+  renderRowActions?: (row: TimelineRow) => ReactNode;
   editing?: {
     onSelect?: (item: TimelineItem) => void;
     onStart?: () => void;
@@ -274,10 +276,28 @@ function drawItem(
     context.beginPath();
     context.rect(x + 7 * s, rowY + 4 * s, Math.max(0, width - 14 * s), 18 * s);
     context.clip();
+    const waveform = item.waveform;
+    if (waveform && Number.isFinite(waveform.sampleDuration) && waveform.sampleDuration > 0) {
+      context.strokeStyle = "rgba(15,25,35,.7)";
+      context.lineWidth = 1;
+      const step = Math.max(1, Math.ceil(waveform.peaks.length / Math.max(1, width)));
+      context.beginPath();
+      for (let i = 0; i < waveform.peaks.length; i += step) {
+        const time = item.range.start + i * waveform.sampleDuration;
+        if (time >= item.range.end) break;
+        let peak = 0;
+        for (let j = i; j < Math.min(i + step, waveform.peaks.length); j++) peak = Math.max(peak, waveform.peaks[j]);
+        const px = timeToX(time);
+        const height = Math.min(1, Math.max(0, peak)) * 4 * s;
+        context.moveTo(px, rowY + 17 * s - height);
+        context.lineTo(px, rowY + 17 * s + height);
+      }
+      context.stroke();
+    }
     context.fillStyle = "rgba(255,255,255,.9)";
-    context.font = `500 ${10 * s}px Inter, Segoe UI, sans-serif`;
+    context.font = `500 ${(waveform ? 8 : 10) * s}px Inter, Segoe UI, sans-serif`;
     context.textBaseline = "middle";
-    context.fillText(item.label, x + 8 * s, rowY + 13 * s);
+    context.fillText(item.label, x + 8 * s, rowY + (waveform ? 9 : 13) * s);
     context.restore();
     return;
   }
@@ -292,20 +312,15 @@ function drawItem(
     context.lineTo(x, rowY + 11 * s);
     context.closePath();
     context.fill();
-  } else if (item.kind === "event-cue") {
-    context.beginPath();
-    context.moveTo(x, rowY + 5 * s);
-    context.lineTo(x + 6 * s, rowY + 9 * s);
-    context.lineTo(x + 6 * s, rowY + 17 * s);
-    context.lineTo(x, rowY + 21 * s);
-    context.lineTo(x - 6 * s, rowY + 17 * s);
-    context.lineTo(x - 6 * s, rowY + 9 * s);
-    context.closePath();
-    context.fill();
   } else {
     context.beginPath();
-    context.arc(x, rowY + 13 * s, 5 * s, 0, Math.PI * 2);
+    context.moveTo(x, rowY + 6 * s);
+    context.lineTo(x + 6 * s, rowY + 13 * s);
+    context.lineTo(x, rowY + 20 * s);
+    context.lineTo(x - 6 * s, rowY + 13 * s);
+    context.closePath();
     context.fill();
+    if (item.selected) { context.strokeStyle = "#fff"; context.stroke(); }
   }
   context.fillStyle = "rgba(238,238,244,.78)";
   context.font = `500 ${9 * s}px Inter, Segoe UI, sans-serif`;
@@ -384,6 +399,8 @@ function dispatchSafely(
 
 export function TimelineEditor({
   dataSource,
+  renderRowActions,
+  selectedItem,
   editing,
   playbackController,
   frameRate = 24,
@@ -668,6 +685,7 @@ export function TimelineEditor({
         const mode: TimelineEditMode = item.kind !== "clip" ? "move"
           : Math.abs(hitTime - item.range.start) * pixelsPerSecond < 6 ? "resize-start"
           : Math.abs(hitTime - item.range.end) * pixelsPerSecond < 6 ? "resize-end" : "move";
+        setEditPreview(null);
         editDrag.current = { pointer: event.pointerId, x: event.clientX, item, mode, revision, source: dataSource };
         element.setPointerCapture(event.pointerId);
         element.focus();
@@ -851,6 +869,7 @@ export function TimelineEditor({
     const viewportElement = timelineViewportRef.current;
     if (!viewportElement) return;
     const onWheel = (event: WheelEvent) => {
+      if (editDrag.current) { event.preventDefault(); return; }
       if (event.altKey || event.metaKey) return;
       const { duration: clipDuration, width } = viewRef.current;
       const base: ViewRange = pendingViewRef.current ?? { pixelsPerSecond: viewRef.current.pixelsPerSecond, scrollLeft: viewportElement.scrollLeft };
@@ -1035,13 +1054,17 @@ export function TimelineEditor({
       context.lineTo(x, scroll.top + viewport.height);
       context.stroke();
     }
-    const items = dataSource.getItems(visibleQuery);
+    const sourceItems = dataSource.getItems(visibleQuery);
+    const preview = editPreview && editDrag.current?.source === dataSource && editDrag.current.revision === revision ? editPreview.next : null;
+    const items = preview
+      ? [...sourceItems.filter(item => item.id !== preview.id || item.kind !== preview.kind), { ...preview, selected: true }]
+      : sourceItems;
     const keys = dataSource.getKeys(visibleQuery);
     const columns = dataSource.getKeyColumns?.(visibleQuery, pixelsPerSecond) ?? [];
     const clippedRows = new Set(rowIds);
     for (const item of items) {
       const rowIndex = rowIndexById.get(item.rowId);
-      if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, item, rowIndex, transform.timeToX, rowHeight);
+      if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, selectedItem ? { ...item, selected: item.id === selectedItem.id && item.kind === selectedItem.kind } : item, rowIndex, transform.timeToX, rowHeight);
     }
     if (columns.length > 0) {
       for (const column of columns) {
@@ -1063,7 +1086,7 @@ export function TimelineEditor({
       keysPainted: columns.length > 0 ? columns.length : keys.length,
       devicePixelRatio: dpr,
     });
-  }, [dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
+  }, [selectedItem?.id, selectedItem?.kind, editPreview, dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
 
   // Tick labels use a monospace font. Measuring a fixed sample tracks host font
   // size changes without coupling label layout to whichever ticks were rendered.
@@ -1157,7 +1180,7 @@ export function TimelineEditor({
           <div className="timeline-editor__tree-content" style={{ height: totalHeight }}>
             {rows.map((row, index) => {
               const target = rowTargets.get(row.id);
-              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} rowHeight={rowHeight} />;
+              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} rowHeight={rowHeight} actions={renderRowActions?.(row)} />;
             })}
             {rowCount === 0 && <div className="timeline-editor__empty">{slots?.emptyState ?? "No timeline tracks"}</div>}
           </div>
@@ -1177,6 +1200,7 @@ export function TimelineEditor({
             onPointerMove={onPointerMove}
             onPointerUp={(event) => finishScrub(event, false)}
             onPointerCancel={(event) => finishScrub(event, true)}
+            onLostPointerCapture={(event) => { if (editDrag.current) finishScrub(event, true); }}
           >
             <span ref={tickWidthProbeRef} className="timeline-editor__tick timeline-editor__tick--measure" aria-hidden="true">00000000</span>
             {ticks.map((tick) => <span className="timeline-editor__tick" key={tick} style={{ left: `${Math.max(tickLabelWidth / 2, Math.min(viewport.width - tickLabelWidth / 2, (tick * pixelsPerSecond) - scroll.left))}px` }}>{formatTimelineTick(tick + range.start, displayMode, fps)}</span>)}
@@ -1203,15 +1227,11 @@ export function TimelineEditor({
             onPointerMove={onPointerMove}
             onPointerUp={(event) => finishScrub(event, false)}
             onPointerCancel={(event) => finishScrub(event, true)}
+            onLostPointerCapture={(event) => { if (editDrag.current) finishScrub(event, true); }}
             onPointerLeave={(event) => { if (pointerIdRef.current === event.pointerId && !event.currentTarget.hasPointerCapture(event.pointerId)) finishScrub(event, true); }}
           >
             <div className="timeline-editor__content" style={{ width: totalWidth, height: totalHeight }} />
             <canvas className="timeline-editor__canvas" ref={canvasRef} />
-            {editPreview && <output className="timeline-editor__edit-preview" style={{ position: "absolute", left: scroll.left + 8, top: scroll.top + 8, pointerEvents: "none", background: "#222", zIndex: 2 }}>
-              {editPreview.next.label}: {editPreview.next.kind === "clip"
-                ? `${editPreview.next.range.start.toFixed(3)} – ${editPreview.next.range.end.toFixed(3)}`
-                : editPreview.next.time.toFixed(3)}
-            </output>}
             <div className="timeline-editor__range-action">{slots?.diagnosticAction}</div>
           </div>
           {loopRangeStyle && (
@@ -1263,6 +1283,7 @@ export function TimelineEditor({
 }
 
 function TimelineRowView({
+  actions,
   row,
   index,
   target,
@@ -1270,6 +1291,7 @@ function TimelineRowView({
   onSelect,
   rowHeight,
 }: {
+  actions?: ReactNode;
   row: TimelineRow;
   index: number;
   target?: TimelinePlaybackTarget;
@@ -1296,7 +1318,8 @@ function TimelineRowView({
       <span className="timeline-editor__row-disclosure">{row.kind === "group" ? "▾" : ""}</span>
       <span className="timeline-editor__row-label" style={{ paddingLeft: `${Math.max(0, row.depth) * 10 * (rowHeight / TIMELINE_ROW_HEIGHT)}px` }}>{row.label}</span>
       {row.bindingId && <span className="timeline-editor__row-binding">{String(row.bindingId).replace(/^binding-/, "")}</span>}
-      {row.muted && <span className="timeline-editor__row-state">M</span>}
+      {actions && <span style={{ display: "inline-flex", marginLeft: "auto" }} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>{actions}</span>}
+      {row.muted && !actions && <span className="timeline-editor__row-state">M</span>}
       {row.locked && <span className="timeline-editor__row-state">L</span>}
     </div>
   );

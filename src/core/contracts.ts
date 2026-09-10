@@ -72,6 +72,8 @@ export interface TimelineClip extends TimelineItemBase {
   kind: "clip";
   id: ClipId;
   range: TimeRange;
+  /** Peak amplitudes at uniform source-time intervals; independent of clip length. */
+  waveform?: { peaks: readonly number[]; sampleDuration: number };
   color: string;
 }
 
