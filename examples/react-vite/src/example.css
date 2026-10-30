@@ -43,3 +43,5 @@ body { background: #101216; color: #d6d6dc; font: 13px Inter, "Segoe UI", sans-s
 .example-editor { grid-row: 2; }
 .example-pane-divider { grid-column: 1; grid-row: 2; align-self: start; position: relative; z-index: 15; height: 6px; transform: translateY(-3px); cursor: row-resize; touch-action: none; }
 .example-pane-divider:hover, .example-pane-divider:focus-visible { background: #6c91bc66; outline: none; }
+
+.example-save-state { font-size: 9px; color: #8995a8; padding: 0 4px; white-space: nowrap; }

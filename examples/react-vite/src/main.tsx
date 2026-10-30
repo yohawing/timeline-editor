@@ -45,7 +45,6 @@ function createPreviewTimeline(): TimelineDataSource {
 function Example(): JSX.Element {
   const preferences = useUiPreferences();
   const panes = usePaneResize(preferences.initial.previewRatio, preferences.saveRatio);
-  useEffect(() => { document.querySelector<HTMLElement>(".timeline-editor__viewport")?.focus({ preventScroll: true }); }, []);
   const params = new URLSearchParams(window.location.search);
   const stress = params.get("stress") === "1";
   const variant = params.get("variant") === "compact" ? "compact" : "full";
@@ -65,14 +64,15 @@ function Example(): JSX.Element {
   }, [malformed, reject]);
   const motion = useMemo(() => stress ? null : dataSource.getItems({ rowIds: dataSource.getRows({ start: 0, count: dataSource.getRowCount() }).map(row => row.id), range: dataSource.getRange() }).find((item): item is TimelineClip => item.kind === "clip" && item.id === "preview-animation") ?? null, [dataSource, stress]);
   const audio = useAudioDemo(playbackController, motion);
+  useEffect(() => { if (audio.ready) document.querySelector<HTMLElement>(".timeline-editor__viewport")?.focus({ preventScroll: true }); }, [audio.ready]);
   const audioData = useMemo(() => withAudioRows(dataSource, audio.document), [dataSource, audio.document]);
   return (
-    <main ref={panes.shell} style={panes.style} className={`example-shell${audio.properties ? " has-properties" : ""}`}>
+    <main data-project-state={!audio.ready ? "loading" : audio.saving ? "saving" : "ready"} ref={panes.shell} style={panes.style} className={`example-shell${audio.properties ? " has-properties" : ""}`}>
       {panes.divider}
       <div className="example-preview" onPointerDown={() => document.querySelector<HTMLElement>(".timeline-editor__viewport")?.focus()}>
         <canvas ref={audio.preview} aria-label="Animation preview" />
       </div>
-      <div className="example-editor" onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
+      <div inert={!audio.ready} className="example-editor" onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
         <TimelineEditor
           dataSource={audioData}
           editing={audio.editing}

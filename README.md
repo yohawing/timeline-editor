@@ -169,5 +169,17 @@ renaming and undo. `--timeline-track-font-size` adjusts label text (default 0.75
 Use `initialViewState` and `onViewStateChange` to restore and observe track width,
 time zoom, row zoom, Snap and frames/seconds display preferences. Initial values
 are read on mount. The demo persists these and its pane split in LocalStorage
-(`timeline-editor.demo.ui.v1`); clips, audio files, selection and playback are not
-saved. Invalid or unavailable storage falls back to defaults without blocking use.
+(`timeline-editor.demo.ui.v1`); project data is stored separately as described below. Invalid or unavailable storage falls back to defaults without blocking use.
+
+The standalone demo automatically saves tracks, clips (including positions,
+Disable and volume), track names and mute/solo state, and the original dropped
+audio files in IndexedDB (`timeline-editor.demo`). The toolbar shows Loading,
+Saving, Saved or Not saved. Wait for Saved before closing/reloading. Restoring
+also decodes the audio so waveforms and synchronized playback work again; playback
+starts only after a user gesture. Undo/redo history and playback position are not
+persisted. Stress fixtures use a separate project key.
+
+This is local browser storage, not a project export or a backup: clearing site
+data removes it, and a different origin/browser has separate storage. Failed
+writes retain the previous saved project and display an error. A failed project
+read or audio decode disables saving for that session to avoid replacing unreadable data.

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function drop(page: Page, time: number, row = 0, name = "dropped.wav", invalid = false, previewOnly = false) {
+  await expect(page.locator("main")).not.toHaveAttribute("data-project-state", "loading");
   await page.evaluate(async ({ time, row, name, invalid, previewOnly }) => {
     const module = await import(/* @vite-ignore */ "/src/audioDemo.tsx");
     const transfer = new DataTransfer();
@@ -74,7 +75,7 @@ test("drop preview and placement use zoomed and scrolled track coordinates", asy
   await expect(page.locator(".timeline-editor__drop-preview")).toHaveCount(0);
   const clip = page.getByRole("button", { name: "Clip placed.wav" });
   await expect(clip).toHaveAttribute("data-start", "5");
-  await expect(clip).toHaveAttribute("data-row-id", "audio-track-2");
+  await expect(clip).toHaveAttribute("data-row-id", await page.locator(".timeline-editor__row").filter({ has: page.locator(".timeline-editor__row-label", { hasText: /^Audio 2$/ }) }).locator(".timeline-editor__row-binding").innerText());
   await drop(page, 5, 2, "rejected.wav"); // animation track rejects audio
   await expect(page.getByRole("button", { name: "Clip rejected.wav" })).toHaveCount(0);
 });
@@ -116,7 +117,7 @@ test("motion clips select, move, change Animation tracks and drive preview timin
   const moved = (await clip.boundingBox())!;
   await page.mouse.move(moved.x + 25, moved.y + 20); await page.mouse.down();
   await page.mouse.move(moved.x + 25, destination.y + 20, { steps: 5 }); await page.mouse.up();
-  await expect(clip).toHaveAttribute("data-row-id", "animation-track-2");
+  await expect(clip).toHaveAttribute("data-row-id", await page.locator(".timeline-editor__row").filter({ has: page.locator(".timeline-editor__row-label", { hasText: /^Animation 1$/ }) }).locator(".timeline-editor__row-binding").innerText());
   const viewport = page.getByRole("application", { name: "Timeline scrubber" });
   await viewport.press("Control+ArrowRight");
   await expect.poll(async () => Number(await clip.getAttribute("data-start"))).toBeCloseTo(2 + 1 / 24);
@@ -299,4 +300,131 @@ test("real Web Audio renders the requested offset and rate", async ({ page }) =>
   });
   expect(result.before).toBeLessThan(0.1);
   expect(result.click).toBeGreaterThan(1);
+});
+
+test("project edits and original audio survive reload and still play", async ({ page }) => {
+  await page.addInitScript(() => {
+    const start = AudioBufferSourceNode.prototype.start;
+    (window as unknown as { audioStarts: number }).audioStarts = 0;
+    AudioBufferSourceNode.prototype.start = function (...args) {
+      (window as unknown as { audioStarts: number }).audioStarts++;
+      start.apply(this, args);
+    };
+  });
+  await page.goto("/");
+  await drop(page, 0, 0, "persisted.wav");
+  const clip = page.getByRole("button", { name: "Clip persisted.wav", exact: true });
+  await expect(clip.getByLabel("Audio waveform")).toBeVisible();
+  const waveform = await clip.locator("path").getAttribute("d");
+  await clip.dblclick({ position: { x: 40, y: 20 } });
+  const volume = page.getByRole("slider", { name: "Volume" });
+  await volume.fill("0.4");
+  await volume.dispatchEvent("change");
+  await page.getByRole("button", { name: "Close properties" }).click();
+  await page.locator(".timeline-editor__row-label").filter({ hasText: "Audio 1" }).dblclick();
+  await page.getByRole("textbox", { name: "Track name" }).fill("Music");
+  await page.getByRole("textbox", { name: "Track name" }).press("Enter");
+  await page.getByRole("button", { name: "Solo Music", exact: true }).click();
+  await addTrack(page, "event");
+  await page.getByRole("button", { name: "Add clip to Event 1" }).click();
+  const motion = page.getByRole("button", { name: "Clip Animation", exact: true });
+  await motion.click();
+  await page.getByRole("application", { name: "Timeline scrubber" }).press("Control+ArrowRight");
+  const motionStart = await motion.getAttribute("data-start");
+  await motion.dblclick({ position: { x: 40, y: 20 } });
+  await page.getByLabel("Disable", { exact: true }).check();
+  await page.getByRole("button", { name: "Close properties" }).click();
+  await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
+  await page.reload();
+  await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
+  await expect(motion).toHaveAttribute("data-start", motionStart!);
+  await motion.dblclick({ position: { x: 40, y: 20 } });
+  await expect(page.getByLabel("Disable", { exact: true })).toBeChecked();
+  await page.getByRole("button", { name: "Close properties" }).click();
+  await expect(page.getByRole("button", { name: "Solo Music", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Clip Event", exact: true })).toBeVisible();
+  await expect(clip.locator("path")).toHaveAttribute("d", waveform!);
+  await clip.dblclick({ position: { x: 40, y: 20 } });
+  await expect(volume).toHaveValue("0.4");
+  await page.getByRole("button", { name: "Close properties" }).click();
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { audioStarts: number }).audioStarts)).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await clip.click();
+  await page.getByRole("application", { name: "Timeline scrubber" }).press("Delete");
+  await expect(clip).toHaveCount(0);
+  await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
+  await page.reload();
+  await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
+  await expect(clip).toHaveCount(0);
+});
+
+test("failed project writes retain the previous saved document", async ({ page }) => {
+  await page.goto("/");
+  await addTrack(page, "event");
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  await page.evaluate(() => {
+    IDBObjectStore.prototype.put = function () { throw new DOMException("Test quota", "QuotaExceededError"); };
+  });
+  await addTrack(page, "animation");
+  await expect(page.getByRole("status")).toHaveText("Not saved");
+  await expect(page.getByRole("alert")).toContainText("could not be saved");
+  await page.reload();
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("button", { name: "Add clip to Event 1" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add clip to Animation 1", exact: true })).toHaveCount(0);
+});
+
+test("an unreadable project is not overwritten by subsequent edits", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  await page.evaluate(async () => {
+    const storage = await import(/* @vite-ignore */ "/src/projectStorage.ts");
+    await storage.writeProject("default", { version: 999, document: { tracks: [], clips: [] }, audio: [] });
+  });
+  await page.reload();
+  await expect(page.getByRole("status")).toHaveText("Not saved");
+  await expect(page.getByRole("alert")).toContainText("automatic saving is disabled");
+  await addTrack(page, "event");
+  await page.reload();
+  await expect(page.getByRole("alert")).toContainText("automatic saving is disabled");
+  await expect(page.getByRole("button", { name: "Add clip to Event 1" })).toHaveCount(0);
+});
+
+test("audio decode failure preserves the saved project and reports unsaved state", async ({ page }) => {
+  await page.goto("/");
+  await drop(page, 0, 0, "decode.wav");
+  await expect(page.getByRole("button", { name: "Clip decode.wav" })).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  await page.evaluate(async () => {
+    const storage = await import(/* @vite-ignore */ "/src/projectStorage.ts");
+    const project = await storage.readProject("default");
+    project.audio[0][1] = new Blob(["invalid audio"]);
+    await storage.writeProject("default", project);
+  });
+  await page.reload();
+  await expect(page.getByRole("status")).toHaveText("Not saved");
+  await expect(page.getByRole("alert")).toContainText("Audio could not be restored");
+  await addTrack(page, "event");
+  await page.reload();
+  await expect(page.getByRole("status")).toHaveText("Not saved");
+  await expect(page.getByRole("button", { name: "Add clip to Event 1" })).toHaveCount(0);
+});
+
+test("a stale session cannot replace a saved project", async ({ page }) => {
+  await page.goto("/");
+  await addTrack(page, "event");
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  await page.evaluate(async () => {
+    const storage = await import(/* @vite-ignore */ "/src/projectStorage.ts");
+    const project = await storage.readProject("default");
+    project.document.tracks = [];
+    let current = true;
+    const pending = storage.writeProject("default", project, () => current);
+    current = false; // Session ends while the database open is pending.
+    await pending;
+  });
+  await page.reload();
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("button", { name: "Add clip to Event 1" })).toBeVisible();
 });

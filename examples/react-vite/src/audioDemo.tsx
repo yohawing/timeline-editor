@@ -1,3 +1,4 @@
+import { readProject, writeProject, type SavedProject } from "./projectStorage";
 import { TrackMenu } from "./TrackMenu";
 import { useEffect, useRef, useState } from "react";
 import { createTimelineAudio } from "@yohawing/timeline-editor/audio";
@@ -32,7 +33,7 @@ const trackTypes = {
 type TrackType = keyof typeof trackTypes;
 interface Track { id: RowId; type: TrackType; label?: string; external?: boolean; muted?: boolean; solo?: boolean }
 interface DemoClip extends TimelineClip { disabled?: boolean; volume?: number }
-interface Document { tracks: readonly Track[]; clips: readonly DemoClip[] }
+export interface Document { tracks: readonly Track[]; clips: readonly DemoClip[] }
 const firstTrack: Track = { id: timelineId<"row">("audio-track-1"), type: "audio" };
 const isAudioTrack = (document: Document, id: RowId) => document.tracks.some(track => track.id === id && track.type === "audio");
 
@@ -67,7 +68,29 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
   const preview = useRef<HTMLCanvasElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const fileTarget = useRef<{ rowId: RowId; time: number } | null>(null);
-  const serial = useRef(1);
+  const assets = useRef(new Map<string, Blob>());
+  const readyRef = useRef(false);
+  const canPersist = useRef(false);
+  const [storageError, setStorageError] = useState("");
+  const [ready, setReady] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const pendingSave = useRef(Promise.resolve());
+  const saveRevision = useRef(0);
+  const projectKey = motion ? "default" : "stress";
+  const persist = (next: Document) => {
+    if (!readyRef.current || !canPersist.current) return;
+    const ticket = epoch.current;
+    const active = () => ticket === epoch.current;
+    const revision = ++saveRevision.current;
+    const ids = new Set(next.clips.map(clip => clip.id as string));
+    const snapshot: SavedProject = { version: 1, document: next, audio: [...assets.current].filter(([id]) => ids.has(id)) };
+    setSaving(true);
+    pendingSave.current = pendingSave.current.catch(() => undefined).then(() => active() ? writeProject(projectKey, snapshot, active) : undefined).then(() => {
+      if (active() && revision === saveRevision.current) { setSaving(false); setStorageError(""); }
+    }).catch(reason => {
+      if (active() && revision === saveRevision.current) { setSaving(false); const message = `Project could not be saved: ${String(reason)}`; setError(message); setStorageError(message); }
+    });
+  };
   const epoch = useRef(0);
   const loadOperation = useRef(0);
   const [error, setError] = useState("");
@@ -89,13 +112,14 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     }
   };
   const publish = (next: Document) => {
-    current.current = next; setDocument(next); sync();
+    current.current = next; setDocument(next); sync(); persist(next);
     const retained = new Set([...past.current, next, ...future.current].flatMap(doc => doc.clips.map(clip => clip.id as string)));
     for (const [id, audio] of runtime.current?.sources ?? []) {
-      if (!retained.has(id)) { audio.dispose(); runtime.current?.sources.delete(id); }
+      if (!retained.has(id)) { audio.dispose(); runtime.current?.sources.delete(id); assets.current.delete(id); }
     }
   };
   const commit = (next: Document) => {
+    if (!readyRef.current) return;
     past.current = [...past.current, current.current].slice(-50); future.current = []; publish(next);
   };
   const undo = () => {
@@ -110,7 +134,7 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
   const canMove = (clip: TimelineClip, rowId: RowId) => trackType(clip.rowId) !== undefined && trackType(clip.rowId) === trackType(rowId);
   const report = (reason: unknown) => setError(String(reason instanceof Error ? reason.message : reason));
   const load = async (files: readonly File[], rowId: RowId, start: number) => {
-    if (!files.length || !isAudioTrack(current.current, rowId)) return;
+    if (!readyRef.current || !files.length || !isAudioTrack(current.current, rowId)) return;
     const ticket = epoch.current;
     const operation = ++loadOperation.current;
     const reportLoad = (reason: unknown) => { if (ticket === epoch.current && operation === loadOperation.current) report(reason); };
@@ -123,18 +147,58 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
         try {
           const decoded = await audio.load(file.arrayBuffer());
           if (!decoded || ticket !== epoch.current || !isAudioTrack(current.current, rowId)) { audio.dispose(); return null; }
-          const id = timelineId<"clip">(`audio-clip-${++serial.current}`);
-          return { audio, clip: { kind: "clip" as const, id, rowId, label: file.name, color: "#3c8d94", range: { start, end: start + decoded.duration }, waveform: decoded.waveform } };
+          const id = timelineId<"clip">(`audio-clip-${crypto.randomUUID()}`);
+          return { audio, file, clip: { kind: "clip" as const, id, rowId, label: file.name, color: "#3c8d94", range: { start, end: start + decoded.duration }, waveform: decoded.waveform } };
         } catch (reason) { audio.dispose(); reportLoad(reason); return null; }
       }));
       if (ticket !== epoch.current || !isAudioTrack(current.current, rowId)) { loaded.forEach(item => item?.audio.dispose()); return; }
       const added = loaded.filter(item => item !== null);
       if (!added.length) return;
-      for (const item of added) owner.sources.set(item.clip.id, item.audio);
+      for (const item of added) { owner.sources.set(item.clip.id, item.audio); assets.current.set(item.clip.id, item.file); }
       commit({ ...current.current, clips: [...current.current.clips, ...added.map(item => item.clip)] });
       setSelected(added[added.length - 1].clip.id);
     } catch (reason) { reportLoad(reason); }
   };
+  useEffect(() => {
+    const ticket = epoch.current;
+    readyRef.current = false; canPersist.current = false; setReady(false);
+    void (async () => {
+      try {
+        const saved = await readProject(projectKey);
+        if (ticket !== epoch.current) return;
+        canPersist.current = true;
+        if (saved) {
+          assets.current = new Map(saved.audio);
+          current.current = saved.document; setDocument(saved.document);
+          past.current = []; future.current = [];
+          if (saved.audio.length) {
+            const owner = { context: new AudioContext(), sources: new Map<string, ReturnType<typeof createTimelineAudio>>() };
+            runtime.current = owner;
+            for (const [id, blob] of saved.audio) {
+              const audio = createTimelineAudio(owner.context);
+              try {
+                await audio.load(blob.arrayBuffer());
+                if (ticket !== epoch.current) { audio.dispose(); return; }
+                owner.sources.set(id, audio);
+              } catch (reason) {
+                audio.dispose();
+                if (ticket !== epoch.current) return;
+                canPersist.current = false;
+                const message = `Audio could not be restored; automatic saving is disabled for this session: ${String(reason)}`;
+                report(message); setStorageError(message);
+              }
+            }
+          }
+        }
+      } catch (reason) { if (ticket === epoch.current) {
+        canPersist.current = false;
+        const message = `Project could not be restored; automatic saving is disabled for this session: ${String(reason)}`;
+        report(message); setStorageError(message);
+      } }
+      finally { if (ticket === epoch.current) { readyRef.current = true; setReady(true); } }
+    })();
+    return () => { readyRef.current = false; ++epoch.current; };
+  }, [controller, projectKey]);
   useEffect(() => {
     let frame = 0;
     const tick = () => {
@@ -244,7 +308,7 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
       if (track.type === "audio") {
         fileTarget.current = { rowId: row.id, time }; fileInput.current?.click();
       } else {
-        const id = timelineId<"clip">(`clip-${++serial.current}`);
+        const id = timelineId<"clip">(`clip-${crypto.randomUUID()}`);
         commit({ ...current.current, clips: [...current.current.clips, { id, rowId: row.id, kind: "clip", label: track.type === "animation" ? "Animation" : "Event", color: trackTypes[track.type].color, range: { start: time, end: time + (track.type === "animation" ? 12 : 1) } }] });
         setSelected(id);
       }
@@ -262,12 +326,13 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
   }} />;
   const addTrack = <TrackMenu options={Object.entries(trackTypes).map(([value, info]) => ({ value, label: `${info.label} Track` }))} onAdd={value => {
     const type = value as TrackType;
-    if (Object.prototype.hasOwnProperty.call(trackTypes, type)) commit({ ...current.current, tracks: [...current.current.tracks, { id: timelineId<"row">(`${type}-track-${++serial.current}`), type }] });
+    if (Object.prototype.hasOwnProperty.call(trackTypes, type)) commit({ ...current.current, tracks: [...current.current.tracks, { id: timelineId<"row">(`${type}-track-${crypto.randomUUID()}`), type }] });
   }} />;
   const toolbar = <>
+    <span className="example-save-state" role="status" title={storageError || "Project and audio are saved in this browser"}>{!ready ? "Loading…" : storageError ? "Not saved" : saving ? "Saving…" : "Saved"}</span>
     <button className="timeline-editor__button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.current.length} onClick={undo}>↶</button>
     <button className="timeline-editor__button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!future.current.length} onClick={redo}>↷</button>
   </>;
   const renameRow = (id: RowId, label: string) => commit({ ...current.current, tracks: current.current.tracks.map(track => track.id === id ? { ...track, label } : track) });
-  return { document, toolbar, addTrack, rowActions, renameRow, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
+  return { document, ready, saving, toolbar, addTrack, rowActions, renameRow, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
 }
