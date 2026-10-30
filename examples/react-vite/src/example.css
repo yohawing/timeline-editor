@@ -34,8 +34,6 @@ body { background: #101216; color: #d6d6dc; font: 13px Inter, "Segoe UI", sans-s
 
 .example-save-state { font-size: 9px; color: #8995a8; padding: 0 4px; white-space: nowrap; }
 
-.example-range-field { display: inline-flex; align-items: center; gap: 3px; font-size: 9px; }
-.example-range-field input { width: 55px; border: 1px solid #414957; background: #17191f; color: #ccd4e0; font: inherit; padding: 2px; }
 
 .example-editor .timeline-editor__row-actions { display: grid; grid-template-columns: repeat(3, 20px); gap: 4px; align-items: center; }
 .example-editor .timeline-editor__row-actions .example-add-track { grid-column: 3; width: 20px; height: 20px; }

@@ -37,7 +37,6 @@ import {
 import {
   clampPixelsPerSecond,
   clampRowZoom,
-  clampScrollLeft,
   fitPixelsPerSecond,
   panViewByFraction,
   timelineGridSteps,
@@ -108,6 +107,8 @@ export interface TimelineEditorSlots {
 }
 
 export interface TimelineViewState {
+  /** Expanded browsing bounds, separate from project/playback data. */
+  viewExtent?: TimeRange | null;
   treeWidth: number | null;
   pixelsPerSecond: number | null;
   rowZoom: number;
@@ -481,10 +482,14 @@ export function TimelineEditor({
     readPlaybackSnapshot,
     readPlaybackSnapshot,
   );
-  const range = useMemo(() => safeRange(dataSource), [dataSource, revision]);
+  const dataRange = useMemo(() => safeRange(dataSource), [dataSource, revision]);
+  const [viewExtent, setViewExtent] = useState<TimeRange | null>(() => isFiniteTimeRange(initialViewState?.viewExtent) && initialViewState!.viewExtent!.end > initialViewState!.viewExtent!.start ? initialViewState!.viewExtent! : null);
+  const range = useMemo(() => ({ start: Math.min(dataRange.start, viewExtent?.start ?? dataRange.start), end: Math.max(dataRange.end, viewExtent?.end ?? dataRange.end) }), [dataRange.start, dataRange.end, viewExtent]);
+  const rangeRef = useRef(range);
+  rangeRef.current = range;
   const duration = Math.max(0, range.end - range.start);
   const [playbackRangePreview, setPlaybackRangePreview] = useState<TimeRange | null>(null);
-  const playbackRange = playbackSnapshot.available ? (playbackSnapshot.range ?? range) : range;
+  const playbackRange = playbackSnapshot.available ? (playbackSnapshot.range ?? dataRange) : dataRange;
   const [displayMode, setDisplayMode] = useState<"frames" | "seconds">(initialViewState?.displayMode === "seconds" || initialViewState?.displayMode === "frames" ? initialViewState.displayMode : initialDisplayMode);
   const [scroll, setScroll] = useState({ left: 0, top: 0 });
   const [viewport, setViewport] = useState<CanvasViewport>({ width: 0, height: 0 });
@@ -492,13 +497,13 @@ export function TimelineEditor({
    * Horizontal zoom. `null` = "fit the whole clip to the viewport" — the
    * default, re-applied whenever the clip's range changes (a new clip shows
    * in full, like UE's Sequencer). A number is a user zoom (wheel / range
-   * bar), clamped so the view never shows less than the whole clip and
-   * never more than MAX_PIXELS_PER_SECOND. See core/viewRange.ts.
+   * bar). User gestures may expand browsing bounds beyond the data without
+   * editing playback bounds. See core/viewRange.ts.
    */
   const [zoomPixelsPerSecond, setZoomPixelsPerSecond] = useState<number | null>(() => Number.isFinite(initialViewState?.pixelsPerSecond) && initialViewState!.pixelsPerSecond! > 0 ? initialViewState!.pixelsPerSecond! : null);
   const pixelsPerSecond = zoomPixelsPerSecond === null
     ? fitPixelsPerSecond(duration, viewport.width)
-    : clampPixelsPerSecond(zoomPixelsPerSecond, duration, viewport.width);
+    : clampPixelsPerSecond(zoomPixelsPerSecond, duration, viewport.width, true);
   /**
    * Vertical zoom (Ctrl+wheel): a multiplier on `--timeline-row-height`,
    * applied as `--timeline-row-zoom` on the root element. The row-height
@@ -510,7 +515,7 @@ export function TimelineEditor({
   const [rowZoom, setRowZoom] = useState(() => clampRowZoom(initialViewState?.rowZoom ?? 1));
   const viewStateCallback = useRef(onViewStateChange);
   useEffect(() => { viewStateCallback.current = onViewStateChange; }, [onViewStateChange]);
-  useEffect(() => { viewStateCallback.current?.({ treeWidth, pixelsPerSecond: zoomPixelsPerSecond, rowZoom, snap, displayMode }); }, [treeWidth, zoomPixelsPerSecond, rowZoom, snap, displayMode]);
+  useEffect(() => { viewStateCallback.current?.({ treeWidth, pixelsPerSecond: zoomPixelsPerSecond, rowZoom, snap, displayMode, viewExtent }); }, [treeWidth, zoomPixelsPerSecond, rowZoom, snap, displayMode, viewExtent]);
   // A scrollLeft to apply after the next commit — set together with a zoom
   // change so the browser clamps it against the NEW content width, not the
   // one still in the DOM at event time.
@@ -521,7 +526,7 @@ export function TimelineEditor({
   const pendingViewRef = useRef<ViewRange | null>(null);
   const rangeBarRef = useRef<HTMLDivElement>(null);
   const rulerRef = useRef<HTMLDivElement>(null);
-  const rangeDragRef = useRef<{ pointerId: number; mode: "pan" | "start" | "end"; originX: number; view: ViewRange; thumb: ViewRangeThumb } | null>(null);
+  const rangeDragRef = useRef<{ pointerId: number; mode: "pan" | "start" | "end"; originX: number; view: ViewRange; thumb: ViewRangeThumb; range: TimeRange } | null>(null);
   const [devicePixelRatio, setDevicePixelRatio] = useState(safeDevicePixelRatio);
   const [localTime, setLocalTime] = useState(range.start);
   const [scrubbing, setScrubbing] = useState(false);
@@ -561,17 +566,17 @@ export function TimelineEditor({
   const rowHeight = measuredRowHeight > 0 ? measuredRowHeight : TIMELINE_ROW_HEIGHT;
 
   useEffect(() => {
-    setLocalTime((time) => clampTimelineTime(time, range));
-    setLocalLoopRange((loop) => clampTimelineLoopRange(loop, range));
-  }, [range.start, range.end]);
+    setLocalTime((time) => clampTimelineTime(time, playbackRange));
+    setLocalLoopRange((loop) => clampTimelineLoopRange(loop, playbackRange));
+  }, [playbackRange.start, playbackRange.end]);
 
-  const previousRange = useRef(range);
+  const previousRange = useRef(dataRange);
   const previousDisplayMode = useRef(initialDisplayMode);
   // A different clip (range) -> back to "fit the whole clip".
   useEffect(() => {
-    if (previousRange.current.start !== range.start || previousRange.current.end !== range.end) setZoomPixelsPerSecond(null);
-    previousRange.current = range;
-  }, [range.start, range.end]);
+    if (previousRange.current.start !== dataRange.start || previousRange.current.end !== dataRange.end) { setZoomPixelsPerSecond(null); setViewExtent(null); }
+    previousRange.current = dataRange;
+  }, [dataRange.start, dataRange.end]);
 
   useLayoutEffect(() => {
     pendingViewRef.current = null;
@@ -696,7 +701,7 @@ export function TimelineEditor({
     if (!element) return;
     const next = resolveTimelineSeekTime(
       range.start + (clientX - element.getBoundingClientRect().left + element.scrollLeft) / pixelsPerSecond,
-      range,
+      playbackRange,
       "frame-snap",
       fps,
     );
@@ -709,7 +714,7 @@ export function TimelineEditor({
     if (playbackController && playbackSnapshot.available) {
       dispatchSafely(playbackController, { type: "seek", time: next, target: commandTarget }, onDiagnostic);
     }
-  }, [commandTarget, fps, onDiagnostic, pixelsPerSecond, playbackController, playbackSnapshot.available, range.end, range.start, updatePlayhead]);
+  }, [commandTarget, fps, onDiagnostic, pixelsPerSecond, playbackController, playbackSnapshot.available, range.start, playbackRange, updatePlayhead]);
 
   const onPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -755,18 +760,18 @@ export function TimelineEditor({
 
   /** Seek transport (skip-to-start/end, frame step) shares scrub's dispatch-or-local-set split. */
   const seekTo = useCallback((nextTime: number) => {
-    const clamped = resolveTimelineSeekTime(nextTime, range, "frame-snap", fps);
+    const clamped = resolveTimelineSeekTime(nextTime, playbackRange, "frame-snap", fps);
     if (playbackController && playbackSnapshot.available) {
       dispatchSafely(playbackController, { type: "seek", time: clamped, target: commandTarget }, onDiagnostic);
     } else if (!playbackController) {
       setLocalTime(clamped);
     }
-  }, [commandTarget, fps, onDiagnostic, playbackController, playbackSnapshot.available, range]);
+  }, [commandTarget, fps, onDiagnostic, playbackController, playbackSnapshot.available, playbackRange]);
 
   const stepFrame = useCallback((direction: -1 | 1) => {
-    const stepped = resolveTimelineSeekTime(time + direction / fps, range, "frame-snap", fps);
+    const stepped = resolveTimelineSeekTime(time + direction / fps, playbackRange, "frame-snap", fps);
     seekTo(stepped);
-  }, [fps, range, seekTo, time]);
+  }, [fps, playbackRange, seekTo, time]);
 
   /**
    * ArrowLeft/ArrowRight step the playhead one frame while the timeline has
@@ -787,7 +792,7 @@ export function TimelineEditor({
     else if (key === "arrowup") seekTo(event.ctrlKey ? playbackRange.end : playbackRange.start);
     else if (key === "arrowleft" && !event.ctrlKey) stepFrame(-1);
     else if (key === "arrowright" && !event.ctrlKey) stepFrame(1);
-    else if (key === "home") { setZoomPixelsPerSecond(null); if (timelineViewportRef.current) timelineViewportRef.current.scrollLeft = 0; }
+    else if (key === "home") { setViewExtent(null); setZoomPixelsPerSecond(null); if (timelineViewportRef.current) timelineViewportRef.current.scrollLeft = 0; }
     else return;
     event.preventDefault();
   };
@@ -796,20 +801,20 @@ export function TimelineEditor({
     if (playbackController && playbackSnapshot.available) {
       dispatchSafely(playbackController, { type: "setLoopRange", range: next, target: commandTarget }, onDiagnostic);
     } else if (!playbackController) {
-      setLocalLoopRange(clampTimelineLoopRange(next, range));
+      setLocalLoopRange(clampTimelineLoopRange(next, playbackRange));
     }
-  }, [commandTarget, range, onDiagnostic, playbackController, playbackSnapshot.available]);
+  }, [commandTarget, playbackRange, onDiagnostic, playbackController, playbackSnapshot.available]);
 
   const loopTimeFromClientX = useCallback((clientX: number) => {
     const element = timelineViewportRef.current;
-    if (!element) return range.start;
+    if (!element) return playbackRange.start;
     return resolveTimelineSeekTime(
       range.start + (clientX - element.getBoundingClientRect().left + element.scrollLeft) / pixelsPerSecond,
-      range,
+      playbackRange,
       "frame-snap",
       fps,
     );
-  }, [fps, pixelsPerSecond, range.end, range.start]);
+  }, [fps, pixelsPerSecond, range.start, playbackRange]);
 
   const onLoopLanePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -833,10 +838,10 @@ export function TimelineEditor({
     loopPointerIdRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     setLoopDragPreview((preview) => {
-      if (preview) dispatchLoopRange(clampTimelineLoopRange(preview, range));
+      if (preview) dispatchLoopRange(clampTimelineLoopRange(preview, playbackRange));
       return null;
     });
-  }, [dispatchLoopRange, range]);
+  }, [dispatchLoopRange, playbackRange]);
 
   const clearLoopRange = useCallback((event: { stopPropagation(): void }) => {
     event.stopPropagation();
@@ -850,7 +855,14 @@ export function TimelineEditor({
    * `pendingScrollLeftRef`); the resulting scroll event then re-reads the
    * same value.
    */
-  const applyView = useCallback((next: ViewRange) => {
+  const applyView = useCallback((desired: ViewRange) => {
+    const current = rangeRef.current;
+    const width = timelineViewportRef.current?.clientWidth ?? 0;
+    const start = Math.min(current.start, current.start + desired.scrollLeft / desired.pixelsPerSecond);
+    const end = Math.max(current.end, current.start + (desired.scrollLeft + width) / desired.pixelsPerSecond);
+    const next = { ...desired, scrollLeft: desired.scrollLeft + (current.start - start) * desired.pixelsPerSecond };
+    rangeRef.current = { start, end };
+    setViewExtent({ start, end });
     pendingViewRef.current = next;
     setZoomPixelsPerSecond(next.pixelsPerSecond);
     pendingScrollLeftRef.current = next.scrollLeft;
@@ -886,7 +898,7 @@ export function TimelineEditor({
         event.preventDefault();
         const raw = event.shiftKey ? (event.deltaY || event.deltaX) : event.deltaX;
         const delta = event.deltaMode === 1 ? raw * 16 : event.deltaMode === 2 ? raw * width : raw;
-        applyView({ pixelsPerSecond: pps, scrollLeft: clampScrollLeft(base.scrollLeft + delta, clipDuration, pps, width) });
+        applyView({ pixelsPerSecond: pps, scrollLeft: base.scrollLeft + delta });
         return;
       }
       if (event.deltaY === 0) return;
@@ -898,6 +910,7 @@ export function TimelineEditor({
         anchorX,
         clipDuration,
         width,
+        true,
       ));
     };
     const rulerElement = rulerRef.current;
@@ -940,7 +953,7 @@ export function TimelineEditor({
       startView = panViewByFraction(view, centre - half - current.start, clipDuration, width);
       applyView(startView);
     }
-    rangeDragRef.current = { pointerId: event.pointerId, mode, originX: event.clientX, view: startView, thumb: viewRangeThumb(startView, clipDuration, width) };
+    rangeDragRef.current = { pointerId: event.pointerId, mode, originX: event.clientX, view: startView, thumb: viewRangeThumb(startView, clipDuration, width), range: { ...rangeRef.current } };
     bar.setPointerCapture(event.pointerId);
     event.preventDefault();
   }, [applyView, rangeBarFraction, scroll.left]);
@@ -950,16 +963,19 @@ export function TimelineEditor({
     if (!drag || drag.pointerId !== event.pointerId) return;
     const bar = event.currentTarget.getBoundingClientRect();
     if (bar.width <= 0) return;
-    const { duration: clipDuration, width } = viewRef.current;
+    const { width } = viewRef.current;
     const dx = (event.clientX - drag.originX) / bar.width;
+    const dragDuration = drag.range.end - drag.range.start;
+    const applyDrag = (view: ViewRange) => applyView({ ...view, scrollLeft: view.scrollLeft + (drag.range.start - rangeRef.current.start) * view.pixelsPerSecond });
     if (drag.mode === "pan") {
-      applyView(panViewByFraction(drag.view, dx, clipDuration, width));
+      const full = drag.thumb.end - drag.thumb.start >= 1 - 1e-6;
+      applyDrag({ ...drag.view, scrollLeft: drag.view.scrollLeft + dx * dragDuration * drag.view.pixelsPerSecond * (full ? -1 : 1) });
       return;
     }
     const next: ViewRangeThumb = drag.mode === "start"
       ? { start: drag.thumb.start + dx, end: drag.thumb.end }
       : { start: drag.thumb.start, end: drag.thumb.end + dx };
-    applyView(viewRangeFromThumb(next, clipDuration, width, drag.mode === "start" ? "end" : "start"));
+    applyDrag(viewRangeFromThumb(next, dragDuration, width, drag.mode === "start" ? "end" : "start", true));
   }, [applyView]);
 
   const onRangeBarPointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
@@ -981,6 +997,8 @@ export function TimelineEditor({
   }, [applyView, scroll.left]);
 
   const fitView = useCallback(() => {
+    setViewExtent(null);
+    pendingViewRef.current = null;
     setZoomPixelsPerSecond(null);
     pendingScrollLeftRef.current = 0;
     setScroll((current) => (current.left === 0 ? current : { ...current, left: 0 }));

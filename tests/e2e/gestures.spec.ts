@@ -1,36 +1,36 @@
 import { test, expect } from "@playwright/test";
+import { setPlaybackEdge } from "./playback-helpers";
 
 test("playback handles preview, commit once, cancel, and restore after reload", async ({ page }) => {
   await page.goto("/");
   const end = page.getByRole("slider", { name: "Playback range end", exact: true });
-  const out = page.getByRole("spinbutton", { name: "Playback end", exact: true });
+  const out = end;
   const box = (await end.boundingBox())!;
   const width = (await page.locator(".timeline-editor__content").boundingBox())!.width;
   await page.mouse.move(box.x + 4, box.y + 6); await page.mouse.down();
   await page.mouse.move(box.x + 4 - width / 3, box.y + 6, { steps: 5 });
   await expect(end).toHaveAttribute("aria-valuetext", "192 f");
-  await expect(out).toHaveValue("288");
-  await page.mouse.up(); await expect(out).toHaveValue("192");
-  await page.getByRole("button", { name: "Undo", exact: true }).click(); await expect(out).toHaveValue("288");
-  await page.getByRole("button", { name: "Redo", exact: true }).click(); await expect(out).toHaveValue("192");
+  await expect(page.getByRole("button", { name: "Toggle time display" })).toContainText("0288");
+  await page.mouse.up(); await expect(out).toHaveAttribute("aria-valuetext", "192 f");
+  await page.getByRole("button", { name: "Undo", exact: true }).click(); await expect(out).toHaveAttribute("aria-valuetext", "288 f");
+  await page.getByRole("button", { name: "Redo", exact: true }).click(); await expect(out).toHaveAttribute("aria-valuetext", "192 f");
   const next = (await end.boundingBox())!;
   await page.mouse.move(next.x + 4, next.y + 6); await page.mouse.down();
   await page.mouse.move(next.x - 80, next.y + 6); await page.keyboard.press("Escape"); await page.mouse.up();
   await expect(end).toHaveAttribute("aria-valuetext", "192 f");
   const start = page.getByRole("slider", { name: "Playback range start", exact: true });
   await start.focus(); await start.press("ArrowRight");
-  await expect(page.getByRole("spinbutton", { name: "Playback start", exact: true })).toHaveValue("1");
+  await expect(start).toHaveAttribute("aria-valuetext", "1 f");
   await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
   await page.reload();
-  await expect(out).toHaveValue("192");
+  await expect(out).toHaveAttribute("aria-valuetext", "192 f");
   await expect(start).toHaveAttribute("aria-valuetext", "1 f");
-  const input = page.getByRole("spinbutton", { name: "Playback start", exact: true });
-  await input.fill("0"); await input.press("Enter");
-  await out.fill("1"); await out.press("Enter");
+  await setPlaybackEdge(page, "start", 0);
+  await setPlaybackEdge(page, "end", 1 / 24);
   await start.focus(); await start.press("ArrowRight");
   await end.focus(); await end.press("ArrowLeft");
   await page.getByRole("button", { name: "Undo", exact: true }).click();
-  await expect(out).toHaveValue("192");
+  await expect(out).toHaveAttribute("aria-valuetext", "192 f");
 });
 
 test("middle drag over a clip pans without moving the clip or seeking; Escape cancels", async ({ page }) => {

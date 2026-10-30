@@ -415,8 +415,6 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     <span className="example-save-state" role="status" aria-label={`${projectName}: ${saveStatus}`} title={`${projectName} · ${saveStatus}`}>{projectName}{!ready || storageError || saving ? "*" : ""}</span>
     <button className="timeline-editor__button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.current.length} onClick={undo}>↶</button>
     <button className="timeline-editor__button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!future.current.length} onClick={redo}>↷</button>
-    <label className="example-range-field">In ({timeDisplay.displayMode === "frames" ? "f" : "s"}) <TimeField {...timeDisplay} label="Playback start" value={playbackRange.start} onCommit={start => changePlaybackRange({ ...playbackRange, start })} /></label>
-    <label className="example-range-field">Out ({timeDisplay.displayMode === "frames" ? "f" : "s"}) <TimeField {...timeDisplay} label="Playback end" value={playbackRange.end} onCommit={end => changePlaybackRange({ ...playbackRange, end })} /></label>
   </>;
   const renameRow = (id: RowId, label: string) => commit({ ...current.current, tracks: current.current.tracks.map(track => track.id === id ? { ...track, label } : track) });
   return { document, changePlaybackRange, collapsed, toggleRow, moveRow, ready, saving, toolbar, addTrack, rowIcon, rowActions, renameRow, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };

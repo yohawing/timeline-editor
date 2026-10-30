@@ -401,7 +401,7 @@ it("restores view preferences and does not emit again when only callback identit
   const changed = vi.fn();
   const dataSource = source();
   const { rerender } = render(<TimelineEditor dataSource={dataSource} initialViewState={{ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds" }} onViewStateChange={state => changed(state)} />);
-  expect(changed).toHaveBeenLastCalledWith({ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds" });
+  expect(changed).toHaveBeenLastCalledWith({ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds", viewExtent: null });
   changed.mockClear();
   rerender(<TimelineEditor dataSource={dataSource} onViewStateChange={state => changed(state)} />);
   expect(changed).not.toHaveBeenCalled();
@@ -428,4 +428,32 @@ it("leaves custom inspector keyboard controls to the host", () => {
   expect(onKeyDown).toHaveBeenCalledTimes(3);
   expect(transport.dispatch).not.toHaveBeenCalled();
   expect(onDelete).not.toHaveBeenCalled();
+});
+
+it("keeps external transport inside playback bounds while browsing outside the data", () => {
+  const playback = controller({ time: 2, range: { start: 2, end: 8 } });
+  render(<TimelineEditor dataSource={source()} playbackController={playback}
+    initialViewState={{ viewExtent: { start: -10, end: 20 }, pixelsPerSecond: 20 }} />);
+  const viewport = screen.getByRole("application", { name: "Timeline scrubber" });
+  const pointer = (element: Element, type: string, clientX: number) => {
+    const event = new Event(type, { bubbles: true });
+    Object.assign(event, { button: 0, pointerId: 1, clientX });
+    fireEvent(element, event);
+  };
+  pointer(viewport, "pointerdown", 0);
+  pointer(viewport, "pointerup", 0);
+  expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 2, target });
+  pointer(viewport, "pointerdown", 800);
+  pointer(viewport, "pointerup", 800);
+  expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 8, target });
+  const lane = document.querySelector(".timeline-editor__loop-lane")!;
+  pointer(lane, "pointerdown", 0);
+  pointer(lane, "pointermove", 800);
+  pointer(lane, "pointerup", 800);
+  expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "setLoopRange", range: { start: 2, end: 8 }, target });
+  playback.dispatch.mockClear();
+  fireEvent.click(screen.getByRole("button", { name: "Previous frame" }));
+  const seeks = playback.dispatch.mock.calls.map(([command]) => command).filter(command => command.type === "seek");
+  expect(seeks.length).toBeGreaterThan(0);
+  for (const seek of seeks) expect(seek.time).toBe(2);
 });

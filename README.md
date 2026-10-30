@@ -26,7 +26,7 @@ Dragging on the ruler or the track area scrubs **live**: every pointer sample di
 
 ### View range, zoom and wheel
 
-The track viewport has no zoom slider and no native horizontal scrollbar. A **view range bar** under the tracks (UE Sequencer style) shows the whole clip as the bar and the visible window as a thumb: drag the thumb to pan, drag either end to zoom that side, click the empty bar to centre the view there, double-click to fit the whole clip. The view fits the whole clip whenever the data source's range changes.
+The track viewport has no zoom slider and no native horizontal scrollbar. A **view range bar** under the tracks (UE Sequencer style) shows the whole clip as the bar and the visible window as a thumb: drag the thumb to pan, drag either end to zoom that side, click the empty bar to centre the view there, double-click to fit the whole clip. The view fits the whole clip whenever the data source's range changes. Wheel zoom-out and dragging either bar edge can extend the view before or after the data. Dragging a full-width thumb right reveals earlier time (left reveals later time); a smaller thumb pans normally. Home or double-clicking the bar fits the data again. Browsing bounds are UI state (`viewExtent`), separate from the playback range.
 
 Wheel over the ruler or the tracks: **wheel** zooms the time axis around the pointer (wheel up = zoom in), **Shift+wheel** (or a trackpad's horizontal delta) pans, **Ctrl+wheel** zooms the row height (`--timeline-row-zoom`, 0.6×–3×). Zoomed in far enough (≥ 6px per frame) the track grid switches to one line per frame and the ruler labels frames; `timelineGridSteps` in `core/viewRange.ts` decides the steps. The zoom math lives in `core/viewRange.ts` and is exported from `@yohawing/timeline-editor/core`.
 
@@ -197,9 +197,9 @@ same source mapping; moving the clip preserves its offset. Turning Loop off
 limits the section to the remaining source. Clip looping is independent of the
 transport Loop button. Both trim and inspector edits support undo and persistence.
 
-The demo In/Out fields edit an independent playback range in the selected display
-unit. Frames mode uses whole-frame inputs at the current FPS; seconds mode uses
-seconds. Clip Start/End, duration, source offset and drag/drop/trim feedback follow
+The demo edits its independent playback range with the ruler handles, without
+header In/Out inputs. Handle values follow the selected display unit.
+Clip Start/End, duration, source offset and drag/drop/trim feedback follow
 the same mode. Display switching never converts or rounds stored canonical seconds. The local
 controller accepts `setPlaybackRange`; other host controllers may handle this
 optional command when exposing their own range UI. Timeline view bounds include
@@ -216,7 +216,7 @@ Playback start/end handles appear in the ruler when the host provides
 `onChangePlaybackRange(range)`. Drag previews the boundaries; release commits once.
 Escape or pointer cancellation restores the original range. Left/Right moves a
 focused handle by one frame; Alt-drag bypasses frame snapping. The demo connects
-this callback to the same undo/persistence path as its In/Out fields.
+this callback to its project undo/persistence path.
 
 Middle-button dragging over the ruler or clips pans horizontally and vertically
 without seeking or editing clips. Escape cancels the pan. Looped clips show source

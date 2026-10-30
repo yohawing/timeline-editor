@@ -1,3 +1,4 @@
+import { setPlaybackEdge } from "./playback-helpers";
 import { expect, test, type Page } from "@playwright/test";
 
 async function drop(page: Page, time: number, row = 0, name = "dropped.wav", invalid = false, previewOnly = false) {
@@ -462,7 +463,7 @@ test("trims source time, loops audio, and saves an independent playback range", 
   await page.getByRole("checkbox", { name: "Loop", exact: true }).check();
   await enterTime(page, "Clip end", "18");
   await page.getByRole("button", { name: "Close properties" }).click();
-  await enterTime(page, "Playback end", "14"); await enterTime(page, "Playback start", "13");
+  await setPlaybackEdge(page, "end", 14); await setPlaybackEdge(page, "start", 13);
   await page.getByRole("button", { name: "Skip to start", exact: true }).click();
   await page.getByRole("button", { name: "Play", exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as any).started.length)).toBeGreaterThan(0);
@@ -473,8 +474,8 @@ test("trims source time, loops audio, and saves an independent playback range", 
   await expect.poll(() => page.getByLabel("Animation preview").getAttribute("data-time")).toBe("14.000");
   await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready"); await page.reload();
   await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
-  await expect(page.getByRole("spinbutton", { name: "Playback start", exact: true })).toHaveValue("13");
-  await expect(page.getByRole("spinbutton", { name: "Playback end", exact: true })).toHaveValue("14");
+  await expect(page.getByRole("slider", { name: "Playback range start", exact: true })).toHaveAttribute("aria-valuenow", "13");
+  await expect(page.getByRole("slider", { name: "Playback range end", exact: true })).toHaveAttribute("aria-valuenow", "14");
   await expect(clip).toHaveAttribute("data-start", "2"); await expect(clip).toHaveAttribute("data-end", "18");
   await clip.dblclick({ position: { x: 40, y: 20 } });
   await expect(page.getByRole("checkbox", { name: "Loop", exact: true })).toBeChecked();

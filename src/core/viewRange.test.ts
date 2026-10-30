@@ -106,3 +106,19 @@ describe("range thumb", () => {
     expect(panViewByFraction(view, 5, 20, 500).scrollLeft).toBe(1500);
   });
 });
+
+describe("open view bounds", () => {
+  it("zooms out beyond data while retaining the pointer time", () => {
+    const view = zoomAroundAnchor({ pixelsPerSecond: 50, scrollLeft: 0 }, 0.5, 250, 10, 500, true);
+    expect(view).toEqual({ pixelsPerSecond: 25, scrollLeft: -125 });
+    expect((view.scrollLeft + 250) / view.pixelsPerSecond).toBe(5);
+  });
+  it("extends either thumb edge while anchoring the opposite time", () => {
+    const left = viewRangeFromThumb({ start: -0.5, end: 1 }, 10, 500, "end", true);
+    expect(left.scrollLeft / left.pixelsPerSecond).toBeCloseTo(-5);
+    expect((left.scrollLeft + 500) / left.pixelsPerSecond).toBeCloseTo(10);
+    const right = viewRangeFromThumb({ start: 0, end: 1.5 }, 10, 500, "start", true);
+    expect(right.scrollLeft).toBe(0);
+    expect(500 / right.pixelsPerSecond).toBeCloseTo(15);
+  });
+});

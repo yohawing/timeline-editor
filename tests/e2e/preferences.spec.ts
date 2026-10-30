@@ -1,3 +1,4 @@
+import { setPlaybackEdge } from "./playback-helpers";
 import { test, expect } from "@playwright/test";
 
 test("track names edit with commit and cancel; controls stay legible and labelled", async ({ page }) => {
@@ -77,11 +78,9 @@ test("stress fixture labels do not advertise unsupported rename", async ({ page 
 
 for (const fps of [24, 30]) test(`time editing and clip feedback follow the display mode at ${fps} fps`, async ({ page }) => {
   await page.goto(`/?fps=${fps}`);
-  const out = page.getByRole("spinbutton", { name: "Playback end", exact: true });
-  const input = page.getByRole("spinbutton", { name: "Playback start", exact: true });
-  await expect(out).toHaveValue(String(12 * fps));
-  await expect(out).toHaveAttribute("step", "1");
-  await expect(out).toHaveAttribute("title", `Playback end (frames, ${fps} fps)`);
+  const out = page.getByRole("slider", { name: "Playback range end", exact: true });
+  const input = page.getByRole("slider", { name: "Playback range start", exact: true });
+  await expect(out).toHaveAttribute("aria-valuetext", `${12 * fps} f`);
   const clip = page.getByRole("button", { name: "Clip Animation", exact: true });
   await clip.dblclick({ position: { x: 40, y: 20 } });
   const start = page.getByRole("spinbutton", { name: "Clip start", exact: true });
@@ -100,20 +99,19 @@ for (const fps of [24, 30]) test(`time editing and clip feedback follow the disp
   await page.mouse.move(box.x + 85, box.y + 20);
   await expect(page.locator(".timeline-editor__drop-preview")).toHaveText(/^-?\d+ f$/);
   await page.keyboard.press("Escape"); await page.mouse.up();
-  await input.fill(String(fps)); await input.press("Enter");
-  await out.fill(String(8 * fps)); await out.press("Enter");
+  await setPlaybackEdge(page, "start", 1);
+  await setPlaybackEdge(page, "end", 8);
   await page.getByRole("button", { name: "Toggle time display" }).click();
-  await expect(out).toHaveValue("8"); await expect(input).toHaveValue("1");
-  await expect(out).toHaveAttribute("step", "0.01");
+  await expect(out).toHaveAttribute("aria-valuetext", "8.00 s"); await expect(input).toHaveAttribute("aria-valuetext", "1.00 s");
   await expect(clip).toHaveAttribute("title", / s — .* s$/);
   await expect.poll(async () => Number(await clip.getAttribute("data-start"))).toBeCloseTo(2 + 1 / fps, 8);
   await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
   await page.reload();
   await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
-  await expect(out).toHaveValue("8");
+  await expect(out).toHaveAttribute("aria-valuetext", "8.00 s");
   await page.getByRole("button", { name: "Toggle time display" }).click();
-  await expect(out).toHaveValue(String(8 * fps));
-  await expect(input).toHaveValue(String(fps));
+  await expect(out).toHaveAttribute("aria-valuetext", `${8 * fps} f`);
+  await expect(input).toHaveAttribute("aria-valuetext", `${fps} f`);
   await expect.poll(async () => Number(await clip.getAttribute("data-start"))).toBeCloseTo(2 + 1 / fps, 8);
 });
 
