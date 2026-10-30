@@ -396,3 +396,13 @@ describe("TimelineEditor transport and interaction boundary", () => {
     expect(onDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ level: "error", source: "timeline" }));
   });
 });
+
+it("restores view preferences and does not emit again when only callback identity changes", () => {
+  const changed = vi.fn();
+  const dataSource = source();
+  const { rerender } = render(<TimelineEditor dataSource={dataSource} initialViewState={{ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds" }} onViewStateChange={state => changed(state)} />);
+  expect(changed).toHaveBeenLastCalledWith({ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds" });
+  changed.mockClear();
+  rerender(<TimelineEditor dataSource={dataSource} onViewStateChange={state => changed(state)} />);
+  expect(changed).not.toHaveBeenCalled();
+});

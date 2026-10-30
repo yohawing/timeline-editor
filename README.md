@@ -156,3 +156,18 @@ supply row controls with `slots.rowActions(row)`; the library does not impose
 track mute/solo state or an add-clip policy. In the demo, each row's + adds a clip
 at the playhead: audio opens a file chooser; Animation adds a procedural preview
 motion; Event adds an editable placeholder section (no event dispatch runtime).
+
+In the standalone demo, drag the Timeline top edge to resize the preview/Timeline
+panes. Up/Down changes the split by 10px, Home or double-click resets it, and
+Escape cancels a drag. The inspector stays independent; this is host layout,
+not an additional TimelineEditor API.
+
+Track labels support optional `onRenameRow(rowId, label)` for double-click editing
+(Enter/blur commits, Escape cancels, blank labels are ignored). The host owns
+renaming and undo. `--timeline-track-font-size` adjusts label text (default 0.75rem).
+
+Use `initialViewState` and `onViewStateChange` to restore and observe track width,
+time zoom, row zoom, Snap and frames/seconds display preferences. Initial values
+are read on mount. The demo persists these and its pane split in LocalStorage
+(`timeline-editor.demo.ui.v1`); clips, audio files, selection and playback are not
+saved. Invalid or unavailable storage falls back to defaults without blocking use.

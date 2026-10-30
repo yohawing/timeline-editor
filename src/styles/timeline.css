@@ -245,9 +245,9 @@
 .timeline-editor__row--target:hover { background: rgba(90,143,224,.12); }
 .timeline-editor__row--target:focus-visible { outline: 1px solid #5a8fe0; outline-offset: -1px; }
 .timeline-editor__row--target.is-target-selected { background: rgba(59,111,196,.28); box-shadow: inset 2px 0 0 #5a8fe0; }
-.timeline-editor__row-color { width: 0.1875rem; height: 0.875rem; flex: 0 0 0.1875rem; margin: 0 0.4375rem 0 0; border-radius: 0.125rem; } /* 3px, 14px, 7px, 2px */
+.timeline-editor__row-color { width: 0.1875rem; height: 100%; align-self: stretch; flex: 0 0 0.1875rem; margin: 0 0.3125rem 0 0; border-radius: 0; } /* 3px, 14px, 7px, 2px */
 .timeline-editor__row-disclosure { width: 0.75rem; flex: 0 0 0.75rem; color: var(--timeline-text-muted); font-size: 0.6875rem; } /* 12px, 11px */
-.timeline-editor__row-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.timeline-editor__row-label { font-size: var(--timeline-track-font-size, 0.75rem); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .timeline-editor__row-binding { max-width: 3.25rem; margin-left: auto; padding-left: 0.5rem; overflow: hidden; color: var(--timeline-text-dim); font-size: 0.5625rem; text-overflow: ellipsis; } /* 52px, 8px, 9px */
 .timeline-editor__row-state { width: 0.8125rem; flex: 0 0 0.8125rem; color: var(--timeline-text-dim); font-size: 0.5rem; text-align: right; } /* 13px, 8px */
 
@@ -358,7 +358,7 @@
 .timeline-editor--compact .timeline-editor__row { font-size: 0.5rem; } /* 8px */
 .timeline-editor--compact .timeline-editor__row-binding,
 .timeline-editor--compact .timeline-editor__row-state { display: none; }
-.timeline-editor--compact .timeline-editor__row-color { height: 0.625rem; margin-right: 0.3125rem; } /* 10px, 5px */
+.timeline-editor--compact .timeline-editor__row-color { height: 100%; margin-right: 0.3125rem; } /* 10px, 5px */
 .timeline-editor--compact { --timeline-tree-width: 9.375rem; } /* 150px initial width */
 
 @media (max-width: 760px) {
@@ -381,3 +381,5 @@
 
 .timeline-editor__row-label[role="button"] { flex: 1; cursor: pointer; }
 .timeline-editor__row-label[role="button"]:focus-visible { outline: 1px solid var(--timeline-accent); }
+
+.timeline-editor__row-name-input { min-width: 0; width: 100%; flex: 1; color: var(--timeline-text); background: var(--timeline-surface-0); border: 1px solid var(--timeline-accent); padding: 2px 3px; font: inherit; font-size: var(--timeline-track-font-size, 0.75rem); font-weight: 600; }

@@ -18,7 +18,7 @@ export function TrackMenu({ options, onAdd }: { options: readonly { value: strin
         if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); buttons[(index + (event.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length]?.focus(); }
         else if (event.key === "Home" || event.key === "End") { event.preventDefault(); buttons[event.key === "Home" ? 0 : buttons.length - 1]?.focus(); }
       }}>
-      {options.map(option => <button key={option.value} role="menuitem" onClick={() => { onAdd(option.value); menu.current?.hidePopover(); trigger.current?.focus(); }}>{option.label}</button>)}
+      {options.map(option => <button key={option.value} role="menuitem" title={option.label} onClick={() => { onAdd(option.value); menu.current?.hidePopover(); trigger.current?.focus(); }}>{option.label}</button>)}
     </div>
   </>;
 }

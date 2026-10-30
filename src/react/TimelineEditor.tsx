@@ -61,6 +61,7 @@ import {
   type TimelinePlaybackTarget,
 } from "../core/playback";
 import "../styles/timeline.css";
+import { RowLabel } from "./RowLabel";
 import { TrackDivider } from "./TrackDivider";
 import { useClipEditing, type TimelineEditing } from "./clipEditing";
 export type { TimelineEditing } from "./clipEditing";
@@ -100,9 +101,21 @@ export interface TimelineEditorSlots {
   diagnosticAction?: ReactNode;
 }
 
+export interface TimelineViewState {
+  treeWidth: number | null;
+  pixelsPerSecond: number | null;
+  rowZoom: number;
+  snap: boolean;
+  displayMode: "frames" | "seconds";
+}
+
 export interface TimelineEditorProps {
+  /** Initial view preferences; persistence remains owned by the host. */
+  initialViewState?: Partial<TimelineViewState>;
+  onViewStateChange?: (state: TimelineViewState) => void;
   dataSource: TimelineDataSource;
   editing?: TimelineEditing;
+  onRenameRow?: (rowId: TimelineRow["id"], label: string) => void;
   playbackController?: TimelinePlaybackController;
   frameRate?: number;
   displayMode?: "frames" | "seconds";
@@ -386,6 +399,9 @@ function dispatchSafely(
 export function TimelineEditor({
   dataSource,
   editing,
+  onRenameRow,
+  initialViewState,
+  onViewStateChange,
   playbackController,
   frameRate = 24,
   displayMode: initialDisplayMode = "frames",
@@ -437,7 +453,7 @@ export function TimelineEditor({
   );
   const range = useMemo(() => safeRange(dataSource), [dataSource, revision]);
   const duration = Math.max(0, range.end - range.start);
-  const [displayMode, setDisplayMode] = useState<"frames" | "seconds">(initialDisplayMode);
+  const [displayMode, setDisplayMode] = useState<"frames" | "seconds">(initialViewState?.displayMode === "seconds" || initialViewState?.displayMode === "frames" ? initialViewState.displayMode : initialDisplayMode);
   const [scroll, setScroll] = useState({ left: 0, top: 0 });
   const [viewport, setViewport] = useState<CanvasViewport>({ width: 0, height: 0 });
   /**
@@ -447,7 +463,7 @@ export function TimelineEditor({
    * bar), clamped so the view never shows less than the whole clip and
    * never more than MAX_PIXELS_PER_SECOND. See core/viewRange.ts.
    */
-  const [zoomPixelsPerSecond, setZoomPixelsPerSecond] = useState<number | null>(null);
+  const [zoomPixelsPerSecond, setZoomPixelsPerSecond] = useState<number | null>(() => Number.isFinite(initialViewState?.pixelsPerSecond) && initialViewState!.pixelsPerSecond! > 0 ? initialViewState!.pixelsPerSecond! : null);
   const pixelsPerSecond = zoomPixelsPerSecond === null
     ? fitPixelsPerSecond(duration, viewport.width)
     : clampPixelsPerSecond(zoomPixelsPerSecond, duration, viewport.width);
@@ -457,9 +473,12 @@ export function TimelineEditor({
    * probe below measures the scaled result, so the canvas and the DOM row
    * strip follow it with no further plumbing.
    */
-  const [treeWidth, setTreeWidth] = useState<number | null>(null);
-  const [snap, setSnap] = useState(true);
-  const [rowZoom, setRowZoom] = useState(1);
+  const [treeWidth, setTreeWidth] = useState<number | null>(() => Number.isFinite(initialViewState?.treeWidth) && initialViewState!.treeWidth! >= 120 ? initialViewState!.treeWidth! : null);
+  const [snap, setSnap] = useState(initialViewState?.snap !== false);
+  const [rowZoom, setRowZoom] = useState(() => clampRowZoom(initialViewState?.rowZoom ?? 1));
+  const viewStateCallback = useRef(onViewStateChange);
+  useEffect(() => { viewStateCallback.current = onViewStateChange; }, [onViewStateChange]);
+  useEffect(() => { viewStateCallback.current?.({ treeWidth, pixelsPerSecond: zoomPixelsPerSecond, rowZoom, snap, displayMode }); }, [treeWidth, zoomPixelsPerSecond, rowZoom, snap, displayMode]);
   // A scrollLeft to apply after the next commit — set together with a zoom
   // change so the browser clamps it against the NEW content width, not the
   // one still in the DOM at event time.
@@ -513,9 +532,12 @@ export function TimelineEditor({
     setLocalLoopRange((loop) => clampTimelineLoopRange(loop, range));
   }, [range.start, range.end]);
 
+  const previousRange = useRef(range);
+  const previousDisplayMode = useRef(initialDisplayMode);
   // A different clip (range) -> back to "fit the whole clip".
   useEffect(() => {
-    setZoomPixelsPerSecond(null);
+    if (previousRange.current.start !== range.start || previousRange.current.end !== range.end) setZoomPixelsPerSecond(null);
+    previousRange.current = range;
   }, [range.start, range.end]);
 
   useLayoutEffect(() => {
@@ -528,7 +550,8 @@ export function TimelineEditor({
   });
 
   useEffect(() => {
-    setDisplayMode(initialDisplayMode);
+    if (previousDisplayMode.current !== initialDisplayMode) setDisplayMode(initialDisplayMode);
+    previousDisplayMode.current = initialDisplayMode;
   }, [initialDisplayMode]);
 
   useEffect(() => {
@@ -1077,8 +1100,8 @@ export function TimelineEditor({
           )}
           <div className="timeline-editor__slot">{slots?.toolbarStart}</div>
           <div className="timeline-editor__transport" role="group" aria-label="Playback controls">
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} aria-label="Skip to start" onClick={() => seekTo(range.start)}><SkipPreviousIcon /></button>
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} aria-label="Previous frame" onClick={() => stepFrame(-1)}><NavigateBeforeIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Skip to start (Up)" aria-label="Skip to start" onClick={() => seekTo(range.start)}><SkipPreviousIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Previous frame (Left)" aria-label="Previous frame" onClick={() => stepFrame(-1)}><NavigateBeforeIcon /></button>
             <button
               type="button"
               className="timeline-editor__button"
@@ -1089,20 +1112,20 @@ export function TimelineEditor({
             >
               {playbackSnapshot.playing ? <PauseIcon /> : <PlayIcon />}
             </button>
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} aria-label="Next frame" onClick={() => stepFrame(1)}><NavigateNextIcon /></button>
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} aria-label="Skip to end" onClick={() => seekTo(range.end)}><SkipNextIcon /></button>
-            <button type="button" className={`timeline-editor__button${playbackSnapshot.looping ? " is-active" : ""}`} disabled={!canTransport} aria-label="Loop" onClick={() => dispatchTransport({ type: "setLooping", looping: !playbackSnapshot.looping })}><RepeatIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Next frame (Right)" aria-label="Next frame" onClick={() => stepFrame(1)}><NavigateNextIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Skip to end (Ctrl+Up)" aria-label="Skip to end" onClick={() => seekTo(range.end)}><SkipNextIcon /></button>
+            <button type="button" className={`timeline-editor__button${playbackSnapshot.looping ? " is-active" : ""}`} disabled={!canTransport} title="Toggle loop playback" aria-label="Loop" onClick={() => dispatchTransport({ type: "setLooping", looping: !playbackSnapshot.looping })}><RepeatIcon /></button>
             <button
               type="button"
               className={`timeline-editor__button timeline-editor__button--rate${playbackRate !== 1 ? " is-active" : ""}`}
               disabled={!canTransport}
-              aria-label="Playback rate"
+              title="Cycle playback rate" aria-label="Playback rate"
               onClick={() => dispatchTransport({ type: "setRate", rate: nextTimelineRate(playbackRate) })}
             >
               {formatTimelineRate(playbackRate)}
             </button>
           </div>
-          <button ref={readoutRef} type="button" className="timeline-editor__readout" onClick={() => setDisplayMode((mode) => mode === "frames" ? "seconds" : "frames")} aria-label="Toggle time display">{playbackReadout}</button>
+          <button ref={readoutRef} type="button" className="timeline-editor__readout" onClick={() => setDisplayMode((mode) => mode === "frames" ? "seconds" : "frames")} title="Switch frames / seconds" aria-label="Toggle time display">{playbackReadout}</button>
           {frameRateOptions ? (
             <select
               className="timeline-editor__fps timeline-editor__fps-select"
@@ -1126,7 +1149,7 @@ export function TimelineEditor({
           <div className="timeline-editor__tree-content" style={{ height: totalHeight }}>
             {rows.map((row, index) => {
               const target = rowTargets.get(row.id);
-              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} rowHeight={rowHeight} actions={slots?.rowActions?.(row)} />;
+              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} rowHeight={rowHeight} actions={slots?.rowActions?.(row)} onRename={onRenameRow} />;
             })}
             {rowCount === 0 && <div className="timeline-editor__empty">{slots?.emptyState ?? "No timeline tracks"}</div>}
           </div>
@@ -1183,7 +1206,7 @@ export function TimelineEditor({
           {loopRangeStyle && (
             <div className="timeline-editor__loop-region" style={loopRangeStyle}>
               {!loopDragPreview && (
-                <button type="button" className="timeline-editor__loop-clear" aria-label="Clear loop range" onClick={clearLoopRange}>×</button>
+                <button type="button" className="timeline-editor__loop-clear" title="Clear loop range" aria-label="Clear loop range" onClick={clearLoopRange}>×</button>
               )}
             </div>
           )}
@@ -1236,6 +1259,7 @@ function TimelineRowView({
   onSelect,
   rowHeight,
   actions,
+  onRename,
 }: {
   row: TimelineRow;
   index: number;
@@ -1244,12 +1268,14 @@ function TimelineRowView({
   onSelect: (target: TimelinePlaybackTarget) => void;
   rowHeight: number;
   actions?: ReactNode;
+  onRename?: (rowId: TimelineRow["id"], label: string) => void;
 }): ReactElement {
   const targetProps = target ? {
     role: "button" as const,
     tabIndex: 0,
     "aria-pressed": selected,
     "aria-label": `Select playback target ${row.label}`,
+    title: `Select playback target ${row.label}`,
     onClick: () => onSelect(target),
     onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
       if (event.key === "Enter" || event.key === " ") {
@@ -1259,10 +1285,10 @@ function TimelineRowView({
     },
   } : {};
   return (
-    <div className={`timeline-editor__row timeline-editor__row--${row.kind}${target ? " timeline-editor__row--target" : ""}${selected ? " is-target-selected" : ""}`} style={{ transform: `translateY(${index * rowHeight}px)` }} {...(actions ? {} : targetProps)}>
+    <div className={`timeline-editor__row timeline-editor__row--${row.kind}${target ? " timeline-editor__row--target" : ""}${selected ? " is-target-selected" : ""}`} style={{ transform: `translateY(${index * rowHeight}px)` }} {...(actions || onRename ? {} : targetProps)}>
       <span className="timeline-editor__row-color" style={{ backgroundColor: row.color ?? "#6c7284" }} />
-      <span className="timeline-editor__row-disclosure">{row.kind === "group" ? "▾" : ""}</span>
-      <span {...(actions ? targetProps : {})} className="timeline-editor__row-label" style={{ paddingLeft: `${Math.max(0, row.depth) * 10 * (rowHeight / TIMELINE_ROW_HEIGHT)}px` }}>{row.label}</span>
+      {row.kind === "group" && <span className="timeline-editor__row-disclosure">▾</span>}
+      <RowLabel row={row} targetProps={actions || onRename ? targetProps : {}} onRename={onRename} style={{ paddingLeft: `${Math.max(0, row.depth) * 10 * (rowHeight / TIMELINE_ROW_HEIGHT)}px` }} />
       {actions && <span className="timeline-editor__row-actions" onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>{actions}</span>}
       {row.bindingId && <span className="timeline-editor__row-binding">{String(row.bindingId).replace(/^binding-/, "")}</span>}
       {row.muted && <span className="timeline-editor__row-state">M</span>}

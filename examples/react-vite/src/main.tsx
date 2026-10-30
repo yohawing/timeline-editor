@@ -12,6 +12,8 @@ import {
 } from "@yohawing/timeline-editor/core";
 import "@yohawing/timeline-editor/styles.css";
 import "./example.css";
+import { useUiPreferences } from "./uiPreferences";
+import { usePaneResize } from "./usePaneResize";
 import { useAudioDemo, withAudioRows } from "./audioDemo";
 
 function createMalformedPlaybackController(): TimelinePlaybackController {
@@ -41,6 +43,8 @@ function createPreviewTimeline(): TimelineDataSource {
 }
 
 function Example(): JSX.Element {
+  const preferences = useUiPreferences();
+  const panes = usePaneResize(preferences.initial.previewRatio, preferences.saveRatio);
   useEffect(() => { document.querySelector<HTMLElement>(".timeline-editor__viewport")?.focus({ preventScroll: true }); }, []);
   const params = new URLSearchParams(window.location.search);
   const stress = params.get("stress") === "1";
@@ -63,7 +67,8 @@ function Example(): JSX.Element {
   const audio = useAudioDemo(playbackController, motion);
   const audioData = useMemo(() => withAudioRows(dataSource, audio.document), [dataSource, audio.document]);
   return (
-    <main className={`example-shell${audio.properties ? " has-properties" : ""}`}>
+    <main ref={panes.shell} style={panes.style} className={`example-shell${audio.properties ? " has-properties" : ""}`}>
+      {panes.divider}
       <div className="example-preview" onPointerDown={() => document.querySelector<HTMLElement>(".timeline-editor__viewport")?.focus()}>
         <canvas ref={audio.preview} aria-label="Animation preview" />
       </div>
@@ -71,6 +76,9 @@ function Example(): JSX.Element {
         <TimelineEditor
           dataSource={audioData}
           editing={audio.editing}
+          initialViewState={preferences.initial.timeline}
+          onViewStateChange={preferences.saveTimeline}
+          onRenameRow={stress ? undefined : audio.renameRow}
           showTitle={false}
           playbackController={audio.controller}
           frameRate={Number.isFinite(fps) && fps > 0 ? fps : 24}
@@ -83,7 +91,7 @@ function Example(): JSX.Element {
             runtime.__timelinePerfSamples = [...(runtime.__timelinePerfSamples ?? []), summary].slice(-120);
           }}
         />
-        {audio.error && <div className="example-error" role="alert">{audio.error}<button aria-label="Dismiss error" onClick={audio.dismissError}>×</button></div>}
+        {audio.error && <div className="example-error" role="alert">{audio.error}<button title="Dismiss error" aria-label="Dismiss error" onClick={audio.dismissError}>×</button></div>}
       </div>
       {audio.filePicker}
       {audio.properties}

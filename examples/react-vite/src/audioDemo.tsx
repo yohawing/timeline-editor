@@ -30,7 +30,7 @@ const trackTypes = {
   event: { label: "Event", color: "#dbb56e", targetKind: "property" },
 } as const;
 type TrackType = keyof typeof trackTypes;
-interface Track { id: RowId; type: TrackType; external?: boolean; muted?: boolean; solo?: boolean }
+interface Track { id: RowId; type: TrackType; label?: string; external?: boolean; muted?: boolean; solo?: boolean }
 interface DemoClip extends TimelineClip { disabled?: boolean; volume?: number }
 interface Document { tracks: readonly Track[]; clips: readonly DemoClip[] }
 const firstTrack: Track = { id: timelineId<"row">("audio-track-1"), type: "audio" };
@@ -38,14 +38,17 @@ const isAudioTrack = (document: Document, id: RowId) => document.tracks.some(tra
 
 export function withAudioRows(base: TimelineDataSource, document: Document): TimelineDataSource {
   const counts = { audio: 0, animation: 0, event: 0 };
-  const tracks = document.tracks.filter(track => !track.external).map(({ id, type }) => ({ id, label: `${trackTypes[type].label} ${++counts[type]}`, kind: "track" as const, depth: 0, color: trackTypes[type].color, bindingId: timelineId<"binding">(id), targetKind: trackTypes[type].targetKind }));
+  const tracks = document.tracks.filter(track => !track.external).map(({ id, type, label }) => {
+    const number = ++counts[type];
+    return { id, label: label ?? `${trackTypes[type].label} ${number}`, kind: "track" as const, depth: 0, color: trackTypes[type].color, bindingId: timelineId<"binding">(id), targetKind: trackTypes[type].targetKind };
+  });
   return {
     ...base,
     getBindings: () => [...tracks.map(row => ({ id: row.bindingId, label: row.label, targetKind: row.targetKind })), ...base.getBindings()],
     getRowCount: () => tracks.length + base.getRowCount(),
     getRows: ({ start, count }) => {
       const audio = tracks.slice(start, start + count);
-      return [...audio, ...base.getRows({ start: Math.max(0, start - tracks.length), count: Math.max(0, count - audio.length) })];
+      return [...audio, ...base.getRows({ start: Math.max(0, start - tracks.length), count: Math.max(0, count - audio.length) }).map(row => ({ ...row, label: document.tracks.find(track => track.id === row.id)?.label ?? row.label }))];
     },
     getItems: query => [...base.getItems(query).filter(item => item.id !== "preview-animation"), ...document.clips.filter(clip => query.rowIds.includes(clip.rowId) && clip.range.start < query.range.end && clip.range.end > query.range.start)],
   };
@@ -265,5 +268,6 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     <button className="timeline-editor__button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.current.length} onClick={undo}>↶</button>
     <button className="timeline-editor__button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!future.current.length} onClick={redo}>↷</button>
   </>;
-  return { document, toolbar, addTrack, rowActions, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
+  const renameRow = (id: RowId, label: string) => commit({ ...current.current, tracks: current.current.tracks.map(track => track.id === id ? { ...track, label } : track) });
+  return { document, toolbar, addTrack, rowActions, renameRow, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
 }

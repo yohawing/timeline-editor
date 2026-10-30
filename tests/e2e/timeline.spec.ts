@@ -131,7 +131,7 @@ test("keeps a compact header and readable waveform rows at the default root size
   await expect.poll(() => px(".timeline-editor__toolbar", "height")).toBe(24);
   await expect.poll(() => px(".timeline-editor__transport .timeline-editor__button", "width")).toBe(22);
   await expect.poll(() => px(".timeline-editor__row", "height")).toBe(44);
-  await expect.poll(() => px(".timeline-editor__row-disclosure", "width")).toBe(12);
+  await expect(page.locator(".timeline-editor__row-disclosure")).toHaveCount(0);
   await expect.poll(() => px(".timeline-editor__tree-viewport", "width")).toBe(212);
   await expect.poll(() => px(".timeline-editor__row-height-probe", "height")).toBe(44);
 });
