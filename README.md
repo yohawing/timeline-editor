@@ -173,8 +173,9 @@ are read on mount. The demo persists these and its pane split in LocalStorage
 
 The standalone demo automatically saves tracks, clips (including positions,
 Disable and volume), track names and mute/solo state, and the original dropped
-audio files in IndexedDB (`timeline-editor.demo`). The toolbar shows Loading,
-Saving, Saved or Not saved. Wait for Saved before closing/reloading. Restoring
+audio files in IndexedDB (`timeline-editor.demo`). The toolbar shows the project name (initially `Untitled`) with `*` while loading,
+saving or unsaved. Hover for the detailed status; wait for `*` to disappear before
+closing/reloading. Restoring
 also decodes the audio so waveforms and synchronized playback work again; playback
 starts only after a user gesture. Undo/redo history and playback position are not
 persisted. Stress fixtures use a separate project key.
@@ -183,3 +184,6 @@ This is local browser storage, not a project export or a backup: clearing site
 data removes it, and a different origin/browser has separate storage. Failed
 writes retain the previous saved project and display an error. A failed project
 read or audio decode disables saving for that session to avoid replacing unreadable data.
+
+`slots.rowIcon(row)` supplies an optional track-type icon before each label.
+The demo provides Audio, Animation (including Root Motion), and Event icons.

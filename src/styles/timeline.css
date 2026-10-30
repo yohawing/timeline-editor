@@ -383,3 +383,5 @@
 .timeline-editor__row-label[role="button"]:focus-visible { outline: 1px solid var(--timeline-accent); }
 
 .timeline-editor__row-name-input { min-width: 0; width: 100%; flex: 1; color: var(--timeline-text); background: var(--timeline-surface-0); border: 1px solid var(--timeline-accent); padding: 2px 3px; font: inherit; font-size: var(--timeline-track-font-size, 0.75rem); font-weight: 600; }
+
+.timeline-editor__row-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; margin-right: 4px; color: var(--timeline-text-muted); }

@@ -95,6 +95,8 @@ export interface TimelineEditorSlots {
   tracksHeaderEnd?: ReactNode;
   /** Host-owned controls for each visible row. */
   rowActions?: (row: TimelineRow) => ReactNode;
+  /** Optional host-owned track type icon before the row label. */
+  rowIcon?: (row: TimelineRow) => ReactNode;
   toolbarStart?: ReactNode;
   toolbarEnd?: ReactNode;
   emptyState?: ReactNode;
@@ -1149,7 +1151,7 @@ export function TimelineEditor({
           <div className="timeline-editor__tree-content" style={{ height: totalHeight }}>
             {rows.map((row, index) => {
               const target = rowTargets.get(row.id);
-              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} rowHeight={rowHeight} actions={slots?.rowActions?.(row)} onRename={onRenameRow} />;
+              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} rowHeight={rowHeight} icon={slots?.rowIcon?.(row)} actions={slots?.rowActions?.(row)} onRename={onRenameRow} />;
             })}
             {rowCount === 0 && <div className="timeline-editor__empty">{slots?.emptyState ?? "No timeline tracks"}</div>}
           </div>
@@ -1259,6 +1261,7 @@ function TimelineRowView({
   onSelect,
   rowHeight,
   actions,
+  icon,
   onRename,
 }: {
   row: TimelineRow;
@@ -1268,6 +1271,7 @@ function TimelineRowView({
   onSelect: (target: TimelinePlaybackTarget) => void;
   rowHeight: number;
   actions?: ReactNode;
+  icon?: ReactNode;
   onRename?: (rowId: TimelineRow["id"], label: string) => void;
 }): ReactElement {
   const targetProps = target ? {
@@ -1288,6 +1292,7 @@ function TimelineRowView({
     <div className={`timeline-editor__row timeline-editor__row--${row.kind}${target ? " timeline-editor__row--target" : ""}${selected ? " is-target-selected" : ""}`} style={{ transform: `translateY(${index * rowHeight}px)` }} {...(actions || onRename ? {} : targetProps)}>
       <span className="timeline-editor__row-color" style={{ backgroundColor: row.color ?? "#6c7284" }} />
       {row.kind === "group" && <span className="timeline-editor__row-disclosure">▾</span>}
+      {icon && <span className="timeline-editor__row-icon">{icon}</span>}
       <RowLabel row={row} targetProps={actions || onRename ? targetProps : {}} onRename={onRename} style={{ paddingLeft: `${Math.max(0, row.depth) * 10 * (rowHeight / TIMELINE_ROW_HEIGHT)}px` }} />
       {actions && <span className="timeline-editor__row-actions" onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>{actions}</span>}
       {row.bindingId && <span className="timeline-editor__row-binding">{String(row.bindingId).replace(/^binding-/, "")}</span>}

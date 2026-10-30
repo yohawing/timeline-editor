@@ -83,7 +83,7 @@ function Example(): JSX.Element {
           playbackController={audio.controller}
           frameRate={Number.isFinite(fps) && fps > 0 ? fps : 24}
           variant={variant}
-          slots={{ toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack, rowActions: audio.rowActions }}
+          slots={{ toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack, rowActions: audio.rowActions, rowIcon: audio.rowIcon }}
           onDiagnostic={(diagnostic) => console.warn(diagnostic.message, diagnostic.error)}
           onPerformanceSummary={(summary) => {
             const runtime = globalThis as { __timelinePerf?: unknown; __timelinePerfSamples?: unknown[] };

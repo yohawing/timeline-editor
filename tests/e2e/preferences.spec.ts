@@ -9,7 +9,7 @@ test("track names edit with commit and cancel; controls stay legible and labelle
   const geometry = await label.evaluate(element => {
     const strip = element.parentElement!.querySelector(".timeline-editor__row-color")!.getBoundingClientRect();
     const row = element.parentElement!.getBoundingClientRect();
-    return { gap: element.getBoundingClientRect().left - strip.right, height: strip.height, rowHeight: row.height };
+    return { gap: element.parentElement!.querySelector(".timeline-editor__row-icon")!.getBoundingClientRect().left - strip.right, height: strip.height, rowHeight: row.height };
   });
   expect(geometry.gap).toBe(5);
   expect(Math.abs(geometry.height - geometry.rowHeight)).toBeLessThanOrEqual(1);

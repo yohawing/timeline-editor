@@ -362,28 +362,28 @@ test("project edits and original audio survive reload and still play", async ({ 
 test("failed project writes retain the previous saved document", async ({ page }) => {
   await page.goto("/");
   await addTrack(page, "event");
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("status")).toHaveText("Untitled");
   await page.evaluate(() => {
     IDBObjectStore.prototype.put = function () { throw new DOMException("Test quota", "QuotaExceededError"); };
   });
   await addTrack(page, "animation");
-  await expect(page.getByRole("status")).toHaveText("Not saved");
+  await expect(page.getByRole("status")).toHaveText("Untitled*");
   await expect(page.getByRole("alert")).toContainText("could not be saved");
   await page.reload();
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("status")).toHaveText("Untitled");
   await expect(page.getByRole("button", { name: "Add clip to Event 1" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add clip to Animation 1", exact: true })).toHaveCount(0);
 });
 
 test("an unreadable project is not overwritten by subsequent edits", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("status")).toHaveText("Untitled");
   await page.evaluate(async () => {
     const storage = await import(/* @vite-ignore */ "/src/projectStorage.ts");
     await storage.writeProject("default", { version: 999, document: { tracks: [], clips: [] }, audio: [] });
   });
   await page.reload();
-  await expect(page.getByRole("status")).toHaveText("Not saved");
+  await expect(page.getByRole("status")).toHaveText("Untitled*");
   await expect(page.getByRole("alert")).toContainText("automatic saving is disabled");
   await addTrack(page, "event");
   await page.reload();
@@ -395,7 +395,7 @@ test("audio decode failure preserves the saved project and reports unsaved state
   await page.goto("/");
   await drop(page, 0, 0, "decode.wav");
   await expect(page.getByRole("button", { name: "Clip decode.wav" })).toBeVisible();
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("status")).toHaveText("Untitled");
   await page.evaluate(async () => {
     const storage = await import(/* @vite-ignore */ "/src/projectStorage.ts");
     const project = await storage.readProject("default");
@@ -403,18 +403,18 @@ test("audio decode failure preserves the saved project and reports unsaved state
     await storage.writeProject("default", project);
   });
   await page.reload();
-  await expect(page.getByRole("status")).toHaveText("Not saved");
+  await expect(page.getByRole("status")).toHaveText("Untitled*");
   await expect(page.getByRole("alert")).toContainText("Audio could not be restored");
   await addTrack(page, "event");
   await page.reload();
-  await expect(page.getByRole("status")).toHaveText("Not saved");
+  await expect(page.getByRole("status")).toHaveText("Untitled*");
   await expect(page.getByRole("button", { name: "Add clip to Event 1" })).toHaveCount(0);
 });
 
 test("a stale session cannot replace a saved project", async ({ page }) => {
   await page.goto("/");
   await addTrack(page, "event");
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("status")).toHaveText("Untitled");
   await page.evaluate(async () => {
     const storage = await import(/* @vite-ignore */ "/src/projectStorage.ts");
     const project = await storage.readProject("default");
@@ -425,6 +425,6 @@ test("a stale session cannot replace a saved project", async ({ page }) => {
     await pending;
   });
   await page.reload();
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("status")).toHaveText("Untitled");
   await expect(page.getByRole("button", { name: "Add clip to Event 1" })).toBeVisible();
 });

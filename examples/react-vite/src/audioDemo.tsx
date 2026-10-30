@@ -1,4 +1,5 @@
 import { readProject, writeProject, type SavedProject } from "./projectStorage";
+import { TrackIcon } from "./TrackIcon";
 import { TrackMenu } from "./TrackMenu";
 import { useEffect, useRef, useState } from "react";
 import { createTimelineAudio } from "@yohawing/timeline-editor/audio";
@@ -328,11 +329,17 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     const type = value as TrackType;
     if (Object.prototype.hasOwnProperty.call(trackTypes, type)) commit({ ...current.current, tracks: [...current.current.tracks, { id: timelineId<"row">(`${type}-track-${crypto.randomUUID()}`), type }] });
   }} />;
+  const projectName = motion ? "Untitled" : "Stress Test";
+  const saveStatus = !ready ? "Loading project" : storageError || (saving ? "Saving project" : "Project saved in this browser");
+  const rowIcon = (row: TimelineRow) => {
+    const track = document.tracks.find(track => track.id === row.id);
+    return track ? <span title={`${trackTypes[track.type].label} Track`}><TrackIcon type={track.type} /></span> : null;
+  };
   const toolbar = <>
-    <span className="example-save-state" role="status" title={storageError || "Project and audio are saved in this browser"}>{!ready ? "Loading…" : storageError ? "Not saved" : saving ? "Saving…" : "Saved"}</span>
+    <span className="example-save-state" role="status" aria-label={`${projectName}: ${saveStatus}`} title={`${projectName} · ${saveStatus}`}>{projectName}{!ready || storageError || saving ? "*" : ""}</span>
     <button className="timeline-editor__button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.current.length} onClick={undo}>↶</button>
     <button className="timeline-editor__button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!future.current.length} onClick={redo}>↷</button>
   </>;
   const renameRow = (id: RowId, label: string) => commit({ ...current.current, tracks: current.current.tracks.map(track => track.id === id ? { ...track, label } : track) });
-  return { document, ready, saving, toolbar, addTrack, rowActions, renameRow, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
+  return { document, ready, saving, toolbar, addTrack, rowIcon, rowActions, renameRow, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
 }
