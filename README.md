@@ -1,6 +1,6 @@
 # @yohawing/timeline-editor
 
-Transport-neutral React and Canvas Timeline UI for read-only animation and media projections.
+Transport-neutral React and Canvas Timeline UI for animation and media projections, with optional host-owned clip editing.
 
 ```tsx
 import { TimelineEditor } from "@yohawing/timeline-editor";
@@ -40,7 +40,7 @@ Wheel over the ruler or the tracks: **wheel** zooms the time axis around the poi
 
 ## v0 boundaries
 
-This release is a read-only projection with Play/Pause/Seek/Loop/Rate UI. TemporalDocument, editing commands, selection mutation, Undo/Redo, Graph Editor, Rust crates, native asset importers, video decoding, and a Tauri adapter are intentionally out of scope.
+The default remains a read-only projection with Play/Pause/Seek/Loop/Rate UI. The optional `editing` prop adds controlled clip selection, movement, file-drop targeting and edit shortcuts. The host owns mutation and history. TemporalDocument, Graph Editor, Rust crates, native asset importers, video decoding, and a Tauri adapter remain out of scope.
 
 The Vite fixture under `examples/react-vite` demonstrates a local DataSource and local playback controller without a desktop shell. The package targets modern Chromium/WebView2 and React 18.2 or 19.
 
@@ -62,13 +62,43 @@ The verify command also runs Chromium interaction coverage. Install the browser 
 
 ## Optional audio follower and standalone demo
 
-Run `npm run build` then `npm run dev`. Drop one audio file onto the timeline,
-choose a file, or press **クリック音で試す** for a generated 12-second WAV.
-Use the existing Play/Pause, ruler scrub, Loop and rate controls. The marker
-flashes at each integer second, matching the generated clicks. Audio appears
-as one row; a successful new drop replaces it, and **音声を解除** releases it.
-Decode errors retain the previous asset. The browser decides which codecs it
-can decode; the demo does not promise support based on a filename extension.
+Run `npm run build` then `npm run dev`. The standalone demo has a Canvas
+animation preview above the Timeline. Drop audio onto **Audio 1** at the desired
+pointer time: the insertion line shows the target track and time before release.
+Use **+ Audio** for another track. Every successful drop adds clips; existing
+clips are retained on decode failure. Multiple/overlapping clips mix during playback.
+File formats depend on the browser decoder, not the extension.
+
+Clips display a bounded peak envelope generated from every decoded PCM channel.
+Drag a clip to change its start or move it to another Audio Track. Position changes
+preserve its duration and PCM alignment. Dragging previews the edit; release commits
+one undo step. **Esc** cancels. Frame snapping is enabled initially; **Alt-drag**
+bypasses it, and **Snap** toggles it. Clips may extend beyond the fixed 12-second
+demo playback range; the viewport shows only their visible portion.
+
+The demo holds up to 50 undo steps, including file addition, movement, deletion and
+track creation. Audio resources are retained while reachable from current/undo/redo
+states, then released. There is no persistence, trimming, multi-selection or export.
+
+Shortcuts apply in the Timeline viewport and track area. Native inputs and
+toolbar buttons retain their own keyboard behavior:
+
+| Key | Action |
+| --- | --- |
+| Space / Down / K | Toggle playback / play / pause |
+| Up / Ctrl+Up | Jump to sequence start / end |
+| Left / Right | Step one frame |
+| Ctrl+Left / Ctrl+Right | Move selected clip one frame |
+| Delete / Backspace | Delete selected clip |
+| Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) | Undo / redo |
+| Home | Fit the timeline view |
+| Esc | Cancel drag and clear selection |
+
+Playback and frame-step bindings follow the supported subset of
+[Epic's Sequencer hotkeys](https://dev.epicgames.com/documentation/en-us/unreal-engine/sequencer-hotkeys-in-unreal-engine).
+Reverse shuttle, keys and trimming commands are not implemented. Existing wheel
+navigation is unchanged. `TimelineEditing` callbacks let other hosts supply their
+own data/history; omitting `editing` preserves read-only behavior.
 
 ```ts
 import { createTimelineAudio } from "@yohawing/timeline-editor/audio";
@@ -78,7 +108,7 @@ const audio = createTimelineAudio(context);
 await audio.load(file.arrayBuffer()); // latest request wins, including file reads
 // In a user gesture, call context.resume() before awaiting anything.
 // On each animation frame, pass the actual host time (not throttled React state):
-audio.sync(snapshot);
+audio.sync(snapshot, false, clip.range); // omit placement for range.start alignment
 // After an explicit seek, force even a sub-tolerance discontinuity:
 audio.sync(snapshotAfterSeek, true);
 // On close:
@@ -87,7 +117,7 @@ await context.close();
 ```
 
 The host clock remains authoritative. `sync` does not extrapolate timestamps;
-`time` must be current. Audio zero maps to `range.start` (zero when absent).
+`time` must be current. Audio zero maps to the optional placement start, otherwise `range.start` (zero when absent).
 It stops at the animation/loop boundary and restarts on the next host wrap
 sample. Keep feeding samples during playback; loops can have a frame-sized gap
 and background-tab throttling can delay their restart. Stop/pause on host
@@ -99,8 +129,7 @@ canonical timeline seconds. `clear` and `dispose` invalidate pending loads.
 
 Decoded audio occupies full PCM memory; rate changes also change pitch.
 Short audio becomes silent at its end, and long audio never extends the timeline.
-There is no mixing, offset editing, waveform, persistence or export.
-The demo marker is driven by the same host sample as audio, not by an audio clock.
+The preview is driven by the same host sample as audio, not by an audio clock.
 Browser tests check real WAV decoding and offline PCM offset/rate output; they
-do not measure physical speaker/display latency. Listen to the clicks against
-the marker to inspect your device; hardware latency compensation is not applied.
+do not measure physical speaker/display latency. Use an audio reference against
+the preview to inspect your device; hardware latency compensation is not applied.

@@ -7,7 +7,7 @@ function fixture() {
   const nodes: { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn>; playbackRate: { value: number }; onended: (() => void) | null }[] = [];
   const context = {
     currentTime: 0, state: "running", destination: {},
-    decodeAudioData: vi.fn(async () => ({ duration: 20 } as AudioBuffer)),
+    decodeAudioData: vi.fn(async () => ({ duration: 20, length: 0, numberOfChannels: 0 } as AudioBuffer)),
     createBufferSource: () => {
       const node = { start: vi.fn(), stop: vi.fn(), connect: vi.fn(), disconnect: vi.fn(), playbackRate: { value: 1 }, onended: null };
       nodes.push(node); return node;
@@ -17,6 +17,15 @@ function fixture() {
   return { audio, context, nodes };
 }
 describe("audio follows the host clock", () => {
+  it("starts only inside the placed clip and resyncs after moving it", async () => {
+    const { audio, nodes } = fixture(); await audio.load(new ArrayBuffer(0));
+    audio.sync(sample(1), false, { start: 3, end: 8 }); expect(nodes).toHaveLength(0);
+    audio.sync(sample(4), false, { start: 3, end: 8 });
+    expect(nodes[0].start).toHaveBeenCalledWith(0, 1, 4);
+    audio.sync(sample(4), false, { start: 2, end: 7 });
+    expect(nodes[1].start).toHaveBeenCalledWith(0, 2, 3);
+    audio.sync(sample(7), false, { start: 2, end: 7 }); expect(nodes[1].stop).toHaveBeenCalled();
+  });
   it("resyncs a changed audio origin and does not replay a naturally ended tail", async () => {
     const { audio, context, nodes } = fixture(); await audio.load(new ArrayBuffer(0));
     audio.sync(sample(3));
@@ -37,9 +46,9 @@ describe("audio follows the host clock", () => {
     context.decodeAudioData.mockImplementationOnce(() => new Promise((resolve) => { finishDecode = resolve; }));
     const first = audio.load(new ArrayBuffer(0)); await Promise.resolve();
     const second = audio.load(new Promise((resolve) => { finishRead = resolve; }));
-    finishDecode({ duration: 2 } as AudioBuffer);
+    finishDecode({ duration: 2, length: 0, numberOfChannels: 0 } as AudioBuffer);
     expect(await first).toBeNull();
-    finishRead(new ArrayBuffer(0)); expect(await second).toEqual({ duration: 20 });
+    finishRead(new ArrayBuffer(0)); expect(await second).toEqual({ duration: 20, waveform: [] });
   });
   it("keeps continuous frames on one source, resyncs drift and explicit small seeks", async () => {
     const { audio, context, nodes } = fixture(); await audio.load(new ArrayBuffer(0));
@@ -58,7 +67,7 @@ describe("audio follows the host clock", () => {
     context.currentTime = 0.5; audio.sync(sample(2, { rate: 2, looping: true, loopRange: { start: 2, end: 4 } }));
     expect(nodes).toHaveLength(2);
     audio.sync(sample(12)); expect(nodes[1].stop).toHaveBeenCalledOnce();
-    context.decodeAudioData.mockResolvedValueOnce({ duration: 1 } as AudioBuffer);
+    context.decodeAudioData.mockResolvedValueOnce({ duration: 1, length: 0, numberOfChannels: 0 } as AudioBuffer);
     await audio.load(new ArrayBuffer(0)); audio.sync(sample(2)); expect(nodes).toHaveLength(2);
     audio.sync(sample(0)); expect(nodes).toHaveLength(3);
   });
@@ -70,10 +79,10 @@ describe("audio follows the host clock", () => {
     let resolve!: (buffer: AudioBuffer) => void;
     context.decodeAudioData.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
     const pending = audio.load(new ArrayBuffer(0)); await Promise.resolve();
-    await audio.load(new ArrayBuffer(0)); resolve({ duration: 1 } as AudioBuffer);
+    await audio.load(new ArrayBuffer(0)); resolve({ duration: 1, length: 0, numberOfChannels: 0 } as AudioBuffer);
     expect(await pending).toBeNull(); audio.sync(sample(2)); expect(nodes).toHaveLength(2);
     context.decodeAudioData.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
-    const cleared = audio.load(new ArrayBuffer(0)); await Promise.resolve(); audio.clear(); resolve({ duration: 20 } as AudioBuffer);
+    const cleared = audio.load(new ArrayBuffer(0)); await Promise.resolve(); audio.clear(); resolve({ duration: 20, length: 0, numberOfChannels: 0 } as AudioBuffer);
     expect(await cleared).toBeNull(); audio.sync(sample(0)); expect(nodes).toHaveLength(2);
     audio.dispose(); await expect(audio.load(new ArrayBuffer(0))).rejects.toThrow("disposed");
   });

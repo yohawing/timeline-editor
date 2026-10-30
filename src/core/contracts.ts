@@ -73,6 +73,8 @@ export interface TimelineClip extends TimelineItemBase {
   id: ClipId;
   range: TimeRange;
   color: string;
+  /** Normalized absolute PCM peaks, evenly spaced across the whole clip. */
+  waveform?: readonly number[];
 }
 
 export interface TimelineCue extends TimelineItemBase {

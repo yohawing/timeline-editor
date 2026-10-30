@@ -61,6 +61,8 @@ import {
   type TimelinePlaybackTarget,
 } from "../core/playback";
 import "../styles/timeline.css";
+import { useClipEditing, type TimelineEditing } from "./clipEditing";
+export type { TimelineEditing } from "./clipEditing";
 import {
   NavigateBeforeIcon,
   NavigateNextIcon,
@@ -96,6 +98,7 @@ export interface TimelineEditorSlots {
 
 export interface TimelineEditorProps {
   dataSource: TimelineDataSource;
+  editing?: TimelineEditing;
   playbackController?: TimelinePlaybackController;
   frameRate?: number;
   displayMode?: "frames" | "seconds";
@@ -378,6 +381,7 @@ function dispatchSafely(
 
 export function TimelineEditor({
   dataSource,
+  editing,
   playbackController,
   frameRate = 24,
   displayMode: initialDisplayMode = "frames",
@@ -449,6 +453,7 @@ export function TimelineEditor({
    * probe below measures the scaled result, so the canvas and the DOM row
    * strip follow it with no further plumbing.
    */
+  const [snap, setSnap] = useState(true);
   const [rowZoom, setRowZoom] = useState(1);
   // A scrollLeft to apply after the next commit — set together with a zoom
   // change so the browser clamps it against the NEW content width, not the
@@ -593,6 +598,8 @@ export function TimelineEditor({
     }
     return targets;
   }, [dataSource, revision, rows]);
+  const clipEditing = useClipEditing({ editing, dataSource, viewport: timelineViewportRef, scale: pixelsPerSecond, rowHeight, range, fps, snap, scrollLeft: scroll.left, width: viewport.width });
+  const editableClips = editing ? dataSource.getItems(visibleQuery).filter(item => item.kind === "clip" && editing.canEditClip(item)) : [];
   const commandTarget = resolveTimelinePlaybackTarget(selectedTarget, playbackSnapshot);
   const loopRange = canTransport ? (playbackSnapshot.loopRange ?? null) : localLoopRange;
 
@@ -645,6 +652,7 @@ export function TimelineEditor({
 
   const onPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    timelineViewportRef.current?.focus();
     pointerIdRef.current = event.pointerId;
     scrubOriginRef.current = time;
     scrubPreviewRef.current = time;
@@ -704,16 +712,24 @@ export function TimelineEditor({
    * focus. Bound only to the track viewport (not window/document), so typing
    * arrow keys in an unrelated input elsewhere in the host app is untouched.
    */
-  const onViewportKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (duration <= 0) return;
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      stepFrame(-1);
-    } else if (event.key === "ArrowRight") {
-      event.preventDefault();
-      stepFrame(1);
-    }
-  }, [duration, stepFrame]);
+  const onViewportKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.isContentEditable || target.closest("input, textarea, select, button") || event.defaultPrevented) return;
+    if (clipEditing.onKeyDown(event)) return;
+    if (duration <= 0 || event.altKey || event.metaKey) return;
+    const key = event.key.toLowerCase();
+    const transport = (type: "play" | "pause") => dispatchSafely(playbackController, { type, target: commandTarget }, onDiagnostic);
+    if (event.ctrlKey && key !== "arrowup") return;
+    if (key === " ") { if (!event.repeat) transport(playbackSnapshot.playing ? "pause" : "play"); }
+    else if (key === "arrowdown") transport("play");
+    else if (key === "k") transport("pause");
+    else if (key === "arrowup") seekTo(event.ctrlKey ? range.end : range.start);
+    else if (key === "arrowleft" && !event.ctrlKey) stepFrame(-1);
+    else if (key === "arrowright" && !event.ctrlKey) stepFrame(1);
+    else if (key === "home") { setZoomPixelsPerSecond(null); if (timelineViewportRef.current) timelineViewportRef.current.scrollLeft = 0; }
+    else return;
+    event.preventDefault();
+  };
 
   const dispatchLoopRange = useCallback((next: TimeRange | null) => {
     if (playbackController && playbackSnapshot.available) {
@@ -985,6 +1001,7 @@ export function TimelineEditor({
     const clippedRows = new Set(rowIds);
     for (const item of items) {
       const rowIndex = rowIndexById.get(item.rowId);
+      if (item.kind === "clip" && editing?.canEditClip(item)) continue;
       if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, item, rowIndex, transform.timeToX, rowHeight);
     }
     if (columns.length > 0) {
@@ -1007,7 +1024,7 @@ export function TimelineEditor({
       keysPainted: columns.length > 0 ? columns.length : keys.length,
       devicePixelRatio: dpr,
     });
-  }, [dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
+  }, [editing, dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
 
   // Tick labels use a monospace font. Measuring a fixed sample tracks host font
   // size changes without coupling label layout to whichever ticks were rendered.
@@ -1044,7 +1061,7 @@ export function TimelineEditor({
   } : undefined;
 
   return (
-    <section className={rootClassName} aria-label="Timeline editor" style={{ "--timeline-row-zoom": rowZoom } as CSSProperties}>
+    <section onKeyDown={onViewportKeyDown} className={rootClassName} aria-label="Timeline editor" style={{ "--timeline-row-zoom": rowZoom } as CSSProperties}>
       <div ref={rowHeightProbeRef} className="timeline-editor__row-height-probe" aria-hidden="true" />
       <header className="timeline-editor__header">
         <div className="timeline-editor__toolbar">
@@ -1061,6 +1078,7 @@ export function TimelineEditor({
               type="button"
               className="timeline-editor__button"
               disabled={!canTransport}
+              title="Play / Pause (Space)"
               aria-label={playbackSnapshot.playing ? "Pause" : "Play"}
               onClick={() => dispatchTransport(playbackSnapshot.playing ? { type: "pause" } : { type: "play" })}
             >
@@ -1092,6 +1110,7 @@ export function TimelineEditor({
           ) : (
             <span className="timeline-editor__fps">{fps} fps</span>
           )}
+          {editing && <button type="button" className="timeline-editor__button timeline-editor__button--text" aria-label="Snap to frames" aria-pressed={snap} title="Snap to frames · Alt-drag to bypass" onClick={() => setSnap(!snap)}>Snap</button>}
           <div className="timeline-editor__slot timeline-editor__slot--end">{slots?.toolbarEnd}</div>
         </div>
       </header>
@@ -1142,7 +1161,7 @@ export function TimelineEditor({
             role="application"
             aria-label="Timeline scrubber"
             onScroll={onScroll}
-            onKeyDown={onViewportKeyDown}
+            {...clipEditing.handlers}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={(event) => finishScrub(event, false)}
@@ -1151,6 +1170,8 @@ export function TimelineEditor({
           >
             <div className="timeline-editor__content" style={{ width: totalWidth, height: totalHeight }} />
             <canvas className="timeline-editor__canvas" ref={canvasRef} />
+            {editableClips.map(clip => clip.kind === "clip" ? clipEditing.renderClip(clip, rowQuery.start + rows.findIndex(row => row.id === clip.rowId)) : null)}
+            {clipEditing.indicator}
             <div className="timeline-editor__range-action">{slots?.diagnosticAction}</div>
           </div>
           {loopRangeStyle && (

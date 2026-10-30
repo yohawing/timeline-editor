@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createTimelineAudio } from "@yohawing/timeline-editor/audio";
+import { projectTimelinePlaybackTime, timelineId, type TimelineClip, type RowId, type TimelineDataSource, type TimelinePlaybackController } from "@yohawing/timeline-editor/core";
+import type { TimelineEditing } from "@yohawing/timeline-editor";
 export { createTimelineAudio };
-import { projectTimelinePlaybackTime, timelineId, type TimelineDataSource, type TimelinePlaybackController } from "@yohawing/timeline-editor/core";
 
 // A quiet 12-second WAV, with a click at each integer second.
 export function clickTrack(): ArrayBuffer {
@@ -21,95 +22,158 @@ export function clickTrack(): ArrayBuffer {
   return bytes;
 }
 
-export function withAudioRow(base: TimelineDataSource, asset: { name: string; duration: number } | null): TimelineDataSource {
-  if (!asset) return base;
-  const rowId = timelineId<"row">("demo-audio");
-  const bindingId = timelineId<"binding">("demo-audio-output");
+
+interface Document { tracks: readonly RowId[]; clips: readonly TimelineClip[] }
+const firstTrack = timelineId<"row">("audio-track-1");
+
+export function withAudioRows(base: TimelineDataSource, document: Document): TimelineDataSource {
+  const tracks = document.tracks.map((id, index) => ({ id, label: `Audio ${index + 1}`, kind: "track" as const, depth: 0, bindingId: timelineId<"binding">(id) }));
   return {
     ...base,
-    getBindings: () => [...base.getBindings(), { id: bindingId, label: asset.name, targetKind: "audio-output" }],
-    getRowCount: () => base.getRowCount() + 1,
-    getRows: ({ start, count }) => start === 0 && count > 0
-      ? [{ id: rowId, label: asset.name, kind: "track" as const, depth: 0, bindingId }, ...base.getRows({ start: 0, count: count - 1 })]
-      : base.getRows({ start: Math.max(0, start - 1), count }),
-    getItems: (query) => [...base.getItems(query), ...(query.rowIds.includes(rowId) ? [{ kind: "clip" as const, id: timelineId<"clip">("demo-audio-clip"), rowId, label: asset.name, range: { start: 0, end: Math.min(12, asset.duration) }, color: "#55bca9" }] : [])],
+    getBindings: () => [...tracks.map(row => ({ id: row.bindingId, label: row.label, targetKind: "audio-output" as const })), ...base.getBindings()],
+    getRowCount: () => tracks.length + base.getRowCount(),
+    getRows: ({ start, count }) => {
+      const audio = tracks.slice(start, start + count);
+      return [...audio, ...base.getRows({ start: Math.max(0, start - tracks.length), count: Math.max(0, count - audio.length) })];
+    },
+    getItems: query => [...base.getItems(query), ...document.clips.filter(clip => query.rowIds.includes(clip.rowId) && clip.range.start < query.range.end && clip.range.end > query.range.start)],
   };
 }
 
 export function useAudioDemo(controller: TimelinePlaybackController) {
-  const runtime = useRef<{ context: AudioContext; audio: ReturnType<typeof createTimelineAudio> } | null>(null);
-  const request = useRef(0);
-  const marker = useRef<HTMLDivElement>(null);
-  const [asset, setAsset] = useState<{ name: string; duration: number } | null>(null);
+  const [document, setDocument] = useState<Document>({ tracks: [firstTrack], clips: [] });
+  const current = useRef(document);
+  const past = useRef<Document[]>([]);
+  const future = useRef<Document[]>([]);
+  const [selected, setSelected] = useState<TimelineClip["id"] | null>(null);
+  const selectedRef = useRef(selected); selectedRef.current = selected;
+  const runtime = useRef<{ context: AudioContext; sources: Map<string, ReturnType<typeof createTimelineAudio>> } | null>(null);
+  const preview = useRef<HTMLCanvasElement>(null);
+  const serial = useRef(1);
+  const epoch = useRef(0);
+  const loadOperation = useRef(0);
   const [error, setError] = useState("");
   const sample = () => {
     const value = controller.getSnapshot();
     return { ...value, time: projectTimelinePlaybackTime(value) };
   };
-  const ensure = () => {
-    if (!runtime.current) {
-      const context = new AudioContext();
-      runtime.current = { context, audio: createTimelineAudio(context) };
+  const sync = (force = false) => {
+    const value = sample();
+    for (const [id, audio] of runtime.current?.sources ?? []) {
+      const clip = current.current.clips.find(clip => clip.id === id);
+      audio.sync(clip ? value : { ...value, playing: false }, force, clip?.range);
     }
-    return runtime.current;
+  };
+  const publish = (next: Document) => {
+    current.current = next; setDocument(next); sync(true);
+    const retained = new Set([...past.current, next, ...future.current].flatMap(doc => doc.clips.map(clip => clip.id as string)));
+    for (const [id, audio] of runtime.current?.sources ?? []) {
+      if (!retained.has(id)) { audio.dispose(); runtime.current?.sources.delete(id); }
+    }
+  };
+  const commit = (next: Document) => {
+    past.current = [...past.current, current.current].slice(-50); future.current = []; publish(next);
+  };
+  const undo = () => {
+    const next = past.current.pop(); if (!next) return;
+    future.current.push(current.current); publish(next); setSelected(null);
+  };
+  const redo = () => {
+    const next = future.current.pop(); if (!next) return;
+    past.current.push(current.current); publish(next); setSelected(null);
   };
   const report = (reason: unknown) => setError(String(reason instanceof Error ? reason.message : reason));
-  const load = async (name: string, read: () => Promise<ArrayBuffer>) => {
-    const ticket = ++request.current;
+  const load = async (files: readonly File[], rowId: RowId, start: number) => {
+    if (!files.length || !current.current.tracks.includes(rowId)) return;
+    const ticket = epoch.current;
+    const operation = ++loadOperation.current;
+    const reportLoad = (reason: unknown) => { if (ticket === epoch.current && operation === loadOperation.current) report(reason); };
     try {
-      const current = ensure();
-      // Resume directly within the file/drop/click gesture, before any await.
-      void current.context.resume().catch((reason) => {
-        if (ticket === request.current && runtime.current === current) report(reason);
-      });
-      const result = await current.audio.load(read());
-      if (ticket !== request.current || !result) return;
-      setAsset({ name, duration: result.duration }); setError("");
-      current.audio.sync(sample(), true);
-    } catch (reason) { if (ticket === request.current) report(reason); }
+      if (!runtime.current) runtime.current = { context: new AudioContext(), sources: new Map() };
+      const owner = runtime.current;
+      void owner.context.resume().catch(reportLoad);
+      const loaded = await Promise.all(files.map(async file => {
+        const audio = createTimelineAudio(owner.context);
+        try {
+          const decoded = await audio.load(file.arrayBuffer());
+          if (!decoded || ticket !== epoch.current || !current.current.tracks.includes(rowId)) { audio.dispose(); return null; }
+          const id = timelineId<"clip">(`audio-clip-${++serial.current}`);
+          return { audio, clip: { kind: "clip" as const, id, rowId, label: file.name, color: "#3c8d94", range: { start, end: start + decoded.duration }, waveform: decoded.waveform } };
+        } catch (reason) { audio.dispose(); reportLoad(reason); return null; }
+      }));
+      if (ticket !== epoch.current || !current.current.tracks.includes(rowId)) { loaded.forEach(item => item?.audio.dispose()); return; }
+      const added = loaded.filter(item => item !== null);
+      if (!added.length) return;
+      for (const item of added) owner.sources.set(item.clip.id, item.audio);
+      commit({ ...current.current, clips: [...current.current.clips, ...added.map(item => item.clip)] });
+      setSelected(added[added.length - 1].clip.id);
+    } catch (reason) { reportLoad(reason); }
   };
   useEffect(() => {
     let frame = 0;
     const tick = () => {
+      sync();
+      const canvas = preview.current;
+      const context = canvas?.getContext("2d");
       const value = sample();
-      runtime.current?.audio.sync(value);
-      if (marker.current) {
-        marker.current.dataset.time = value.time.toFixed(3);
-        marker.current.style.setProperty("--progress", `${value.time / 12 * 100}%`);
-        marker.current.dataset.flash = String(value.time % 1 < 0.08);
-        marker.current.textContent = `${value.time.toFixed(2)} s`;
+      if (canvas && context) {
+        const bounds = canvas.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1;
+        const w = Math.max(1, Math.round(bounds.width * dpr)); const h = Math.max(1, Math.round(bounds.height * dpr));
+        if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+        context.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const width = bounds.width, height = bounds.height;
+        context.fillStyle = "#14171d"; context.fillRect(0, 0, width, height);
+        context.strokeStyle = "#282e39"; context.lineWidth = 1;
+        const floor = height * 0.7;
+        context.beginPath(); context.moveTo(0, floor); context.lineTo(width, floor); context.stroke();
+        const phase = value.time % 1;
+        const x = width * (0.15 + value.time / 12 * 0.7);
+        const y = floor - 24 - Math.sin(phase * Math.PI) * Math.min(100, height * 0.25);
+        context.fillStyle = phase < 0.08 ? "#ffd783" : "#72bfc8";
+        context.beginPath(); context.arc(x, y, 23, 0, Math.PI * 2); context.fill();
+        context.fillStyle = "#8d98aa"; context.font = "12px Consolas, monospace";
+        context.fillText(`${value.time.toFixed(2)} s`, 18, 26);
+        canvas.dataset.time = value.time.toFixed(3);
       }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => {
-      cancelAnimationFrame(frame); ++request.current;
-      runtime.current?.audio.dispose();
+      cancelAnimationFrame(frame); ++epoch.current;
+      for (const audio of runtime.current?.sources.values() ?? []) audio.dispose();
       if (runtime.current) void runtime.current.context.close();
       runtime.current = null;
-      void Promise.resolve(controller.dispatch({ type: "pause", target: null })).catch(() => undefined);
+      try { void Promise.resolve(controller.dispatch({ type: "pause", target: null })).catch(() => undefined); } catch { /* teardown */ }
     };
   }, [controller]);
   const wrapped: TimelinePlaybackController = {
-    getSnapshot: controller.getSnapshot,
-    subscribe: controller.subscribe,
-    dispatch: async (command) => {
+    getSnapshot: controller.getSnapshot, subscribe: controller.subscribe,
+    dispatch: async command => {
       const resumed = command.type === "play" ? runtime.current?.context.resume() : undefined;
-      await controller.dispatch(command);
-      await resumed;
-      runtime.current?.audio.sync(sample(), command.type === "seek");
+      await controller.dispatch(command); await resumed; sync(command.type === "seek");
     },
   };
-  const controls = <div className="audio-demo-controls">
-    <label className="audio-file-button">音声を選択<input aria-label="Audio file" type="file" accept="audio/*" onChange={(event) => {
-      const file = event.target.files?.[0]; if (file) void load(file.name, () => file.arrayBuffer()); event.target.value = "";
-    }} /></label>
-    <button onClick={() => void load("Click track.wav", async () => clickTrack())}>クリック音で試す</button>
-    {asset && <><span title={asset.name} className="audio-name">{asset.name}</span><button onClick={() => { ++request.current; runtime.current?.audio.clear(); setAsset(null); setError(""); }}>音声を解除</button></>}
-    <div ref={marker} className="audio-marker" aria-label="Sync marker" />
-    {error && <span role="alert">{error}</span>}
-  </div>;
-  return { asset, controls, controller: wrapped, onDrop: (event: React.DragEvent) => {
-    event.preventDefault(); const file = event.dataTransfer.files[0]; if (file) void load(file.name, () => file.arrayBuffer());
-  } };
+  const editing: TimelineEditing = {
+    selectedClipId: selected,
+    canEditClip: clip => document.tracks.includes(clip.rowId),
+    canDropFiles: rowId => document.tracks.includes(rowId),
+    onSelectClip: setSelected,
+    onDropFiles: (files, rowId, time) => { setError(""); void load(files, rowId, time); },
+    onMoveClip: (id, rowId, start) => {
+      const old = current.current.clips.find(clip => clip.id === id);
+      if (!old || !current.current.tracks.includes(rowId) || (old.range.start === start && old.rowId === rowId)) return;
+      commit({ ...current.current, clips: current.current.clips.map(clip => clip.id === id ? { ...clip, rowId, range: { start, end: start + clip.range.end - clip.range.start } } : clip) });
+    },
+    onDelete: () => {
+      if (!current.current.clips.some(clip => clip.id === selectedRef.current)) return;
+      commit({ ...current.current, clips: current.current.clips.filter(clip => clip.id !== selectedRef.current) }); setSelected(null);
+    },
+    onUndo: undo, onRedo: redo,
+  };
+  const toolbar = <>
+    <button className="timeline-editor__button timeline-editor__button--text" title="Add Audio Track" aria-label="Add Audio Track" onClick={() => commit({ ...current.current, tracks: [...current.current.tracks, timelineId<"row">(`audio-track-${++serial.current}`)] })}>+ Audio</button>
+    <button className="timeline-editor__button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.current.length} onClick={undo}>↶</button>
+    <button className="timeline-editor__button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!future.current.length} onClick={redo}>↷</button>
+  </>;
+  return { document, toolbar, editing, preview, controller: wrapped, error, dismissError: () => setError("") };
 }

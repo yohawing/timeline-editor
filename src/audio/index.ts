@@ -1,3 +1,6 @@
+import { createAudioWaveform } from "./waveform";
+export { createAudioWaveform } from "./waveform";
+import type { TimeRange } from "../core/contracts";
 import type { TimelinePlaybackSnapshot } from "../core/playback";
 import { clampTimelineLoopRange } from "../core/display";
 
@@ -26,7 +29,7 @@ export function createTimelineAudio(context: AudioContext, driftTolerance = 0.08
   };
   return {
     /** Returns null for superseded loads. A failed decode preserves the old asset. */
-    async load(bytes: ArrayBuffer | Promise<ArrayBuffer>): Promise<{ duration: number } | null> {
+    async load(bytes: ArrayBuffer | Promise<ArrayBuffer>): Promise<{ duration: number; waveform: readonly number[] } | null> {
       if (disposed) throw new Error("Audio follower is disposed");
       const ticket = ++generation;
       let decoded: AudioBuffer;
@@ -39,24 +42,26 @@ export function createTimelineAudio(context: AudioContext, driftTolerance = 0.08
       if (ticket !== generation || disposed) return null;
       stop();
       buffer = decoded;
-      return { duration: decoded.duration };
+      return { duration: decoded.duration, waveform: createAudioWaveform(decoded) };
     },
     /** Call each host frame, and immediately after operations. Set discontinuity
      * for explicit seeks (including seeks smaller than the drift tolerance).
-     * No wall-clock projection is performed here. Audio zero is range.start.
+     * No wall-clock projection is performed here. Audio zero is placement.start
+     * when supplied, otherwise range.start. Placement end stops this clip.
      */
-    sync(sample: TimelinePlaybackSnapshot, discontinuity = false): void {
+    sync(sample: TimelinePlaybackSnapshot, discontinuity = false, placement?: TimeRange): void {
       if (disposed) return;
-      const start = sample.range?.start ?? 0;
+      const timelineStart = sample.range?.start ?? 0;
+      const start = placement?.start ?? timelineStart;
       const finish = sample.range?.end ?? sample.duration;
       const nextRate = sample.rate ?? 1;
-      const loop = sample.looping ? clampTimelineLoopRange(sample.loopRange, { start, end: finish }) : null;
-      const boundary = loop?.end ?? finish;
+      const loop = sample.looping ? clampTimelineLoopRange(sample.loopRange, { start: timelineStart, end: finish }) : null;
+      const boundary = Math.min(loop?.end ?? finish, placement?.end ?? finish);
       const offset = sample.time - start;
       const backwards = sample.time < lastTime;
       lastTime = sample.time;
       if (!buffer || !sample.available || !sample.playing || context.state !== "running" ||
-          ![start, finish, sample.time, nextRate].every(Number.isFinite) || nextRate <= 0 ||
+          ![start, finish, boundary, sample.time, nextRate].every(Number.isFinite) || nextRate <= 0 ||
           offset < 0 || offset >= buffer.duration || sample.time >= boundary) {
         stop(); return;
       }
