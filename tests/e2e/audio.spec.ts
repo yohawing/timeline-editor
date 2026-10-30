@@ -51,7 +51,7 @@ test("two panes: drop at cursor, waveform, drag, cancel, delete, undo and redo",
   await viewport.press("Control+Shift+z"); await expect(clip).toHaveCount(0);
   await viewport.press("Control+z");
   await addTrack(page, "audio");
-  await drop(page, 1, 1, "second.wav");
+  await drop(page, 1, 2, "second.wav");
   await expect(page.getByRole("button", { name: "Clip second.wav", exact: true })).toHaveAttribute("data-start", "1");
   await drop(page, 4, 0, "broken.wav", true);
   await expect(page.getByRole("alert")).toBeVisible();
@@ -71,9 +71,9 @@ test("drop preview and placement use zoomed and scrolled track coordinates", asy
     el.scrollTop = 10;
     el.dispatchEvent(new Event("scroll"));
   });
-  await drop(page, 5, 1, "placed.wav", false, true);
+  await drop(page, 5, 2, "placed.wav", false, true);
   await expect(page.locator(".timeline-editor__drop-preview")).toContainText("Audio 2 · 120 f");
-  await drop(page, 5, 1, "placed.wav");
+  await drop(page, 5, 2, "placed.wav");
   await expect(page.locator(".timeline-editor__drop-preview")).toHaveCount(0);
   const clip = page.getByRole("button", { name: "Clip placed.wav" });
   await expect(clip).toHaveAttribute("data-start", "5");
@@ -87,16 +87,16 @@ test("track menu creates typed tracks, supports undo, and limits audio drops", a
 
   await addTrack(page, "animation");
   await addTrack(page, "event");
-  await expect(page.locator(".timeline-editor__row-label")).toHaveText(["Audio 1", "Animation 1", "Event 1", "Root Motion"]);
-  await drop(page, 2, 1, "not-animation.wav");
-  await drop(page, 2, 2, "not-event.wav");
+  await expect(page.locator(".timeline-editor__row-label")).toHaveText(["Audio 1", "Root Motion", "Animation 1", "Event 1"]);
+  await drop(page, 2, 2, "not-animation.wav");
+  await drop(page, 2, 3, "not-event.wav");
   await expect(page.locator(".timeline-editor__waveform")).toHaveCount(0);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
-  await expect(page.locator(".timeline-editor__row-label")).toHaveText(["Audio 1", "Animation 1", "Root Motion"]);
+  await expect(page.locator(".timeline-editor__row-label")).toHaveText(["Audio 1", "Root Motion", "Animation 1"]);
   await page.getByRole("button", { name: "Redo", exact: true }).click();
   await addTrack(page, "audio");
-  await expect(page.locator(".timeline-editor__row-label")).toHaveText(["Audio 1", "Animation 1", "Event 1", "Audio 2", "Root Motion"]);
-  await drop(page, 2, 3, "accepted.wav");
+  await expect(page.locator(".timeline-editor__row-label")).toHaveText(["Audio 1", "Root Motion", "Animation 1", "Event 1", "Audio 2"]);
+  await drop(page, 2, 4, "accepted.wav");
   await expect(page.getByRole("button", { name: "Clip accepted.wav" })).toHaveAttribute("data-start", "2");
   await page.screenshot({ path: test.info().outputPath("track-types.png") });
 });
@@ -185,7 +185,7 @@ test("inspector mute/solo changes real audio voices, volume is undoable, and hea
   await panel.getByLabel("Disable", { exact: true }).uncheck();
   await page.getByRole("button", { name: "Skip to start", exact: true }).click();
   await panel.getByRole("button", { name: "Close properties" }).click();
-  await drop(page, 0, 0, "first.wav"); await addTrack(page, "audio"); await drop(page, 0, 1, "second.wav");
+  await drop(page, 0, 0, "first.wav"); await addTrack(page, "audio"); await drop(page, 0, 2, "second.wav");
   const first = page.getByRole("button", { name: "Clip first.wav", exact: true });
   await first.dblclick({ position: { x: 30, y: 20 } });
   await drop(page, 0, 0, "sibling.wav");
@@ -212,7 +212,7 @@ test("inspector mute/solo changes real audio voices, volume is undoable, and hea
       return new Promise(resolve => { (window as unknown as { finishRead(): void }).finishRead = () => { void read.call(this).then(resolve); }; });
     };
   });
-  await drop(page, 0, 1, "during-volume.wav");
+  await drop(page, 0, 2, "during-volume.wav");
   await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2); await page.mouse.down();
   await page.mouse.move(bounds.x + bounds.width * 0.3, bounds.y + bounds.height / 2, { steps: 3 });
   await page.evaluate(() => (window as unknown as { finishRead(): void }).finishRead());
@@ -503,7 +503,7 @@ test("groups move and collapse tracks, preserve clips, and restore hierarchy", a
   const audio = page.locator(".timeline-editor__row-label").filter({ hasText: /^Audio 1$/ });
   const group = page.locator(".timeline-editor__row-label").filter({ hasText: /^Group 1$/ });
   await audio.dragTo(group);
-  await expect(audio).toHaveCSS("padding-left", /[1-9]/);
+  await expect(audio.locator("..")).toHaveAttribute("data-depth", /[1-9]/);
   await page.getByRole("button", { name: "Play", exact: true }).click();
   await expect.poll(activeVoices).toBe(1);
   await page.getByRole("button", { name: "Collapse Group 1" }).click();
@@ -521,7 +521,7 @@ test("groups move and collapse tracks, preserve clips, and restore hierarchy", a
   await page.getByRole("button", { name: "Expand Group 1" }).click();
   await expect(page.getByRole("button", { name: "Clip group.wav", exact: true })).toBeVisible();
   await audio.dragTo(page.locator(".timeline-editor__tree-heading"));
-  await expect(audio).toHaveCSS("padding-left", "0px");
+  await expect(audio.locator("..")).toHaveAttribute("data-depth", "0");
   await page.getByRole("button", { name: "Collapse Group 1" }).click();
   await expect(audio).toBeVisible();
   await page.getByRole("button", { name: "Add track to Group 1", exact: true }).click();
@@ -529,8 +529,8 @@ test("groups move and collapse tracks, preserve clips, and restore hierarchy", a
   const child = page.locator(".timeline-editor__row-label").filter({ hasText: /^Group 2$/ });
   await expect(child).toBeVisible();
   await group.dragTo(child); // Parent cannot be placed in its descendant.
-  await expect(group).toHaveCSS("padding-left", "0px");
-  await expect(child).toHaveCSS("padding-left", /[1-9]/);
+  await expect(group.locator("..")).toHaveAttribute("data-depth", "0");
+  await expect(child.locator("..")).toHaveAttribute("data-depth", /[1-9]/);
 });
 
 test("native looped audio at 2x wraps the source and stops at the clip boundary", async ({ page }) => {

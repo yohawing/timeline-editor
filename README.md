@@ -232,3 +232,12 @@ editors it overlays the track area while staying within the editor. The supplied
 and control-size tokens as the timeline; property content and mutations remain
 host-owned. Track label/icon/action centers and action columns are aligned in the
 demo, including Group rows with no Solo control.
+
+Track labels can be dragged above/below another row to reorder when the host
+provides `onReorderRow(rowId, targetRowId, "before" | "after")`. An insertion line
+shows the destination. A Group's middle area still uses `onMoveRow` to parent a
+track. The demo moves groups with their descendants, rejects hierarchy cycles,
+and saves order through project undo/persistence. Child icons and titles indent
+16px per level; row controls remain aligned. Muted tracks and tracks excluded by
+Solo dim their clips using the same evaluation rules as audio/preview, without
+changing each clip's saved Disable flag.

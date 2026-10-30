@@ -40,10 +40,20 @@ export interface Document { playbackRange?: TimeRange; tracks: readonly Track[];
 const firstTrack: Track = { id: timelineId<"row">("audio-track-1"), type: "audio" };
 const isAudioTrack = (document: Document, id: RowId) => document.tracks.some(track => track.id === id && track.type === "audio");
 
+function trackEnabled(document: Document, rowId: RowId): boolean {
+  const track = document.tracks.find(item => item.id === rowId);
+  let current = track;
+  while (current) {
+    if (current.muted) return false;
+    current = document.tracks.find(item => item.id === current?.parentId);
+  }
+  return !document.tracks.some(other => other.solo && other.type === track?.type) || Boolean(track?.solo);
+}
+
 export function withAudioRows(base: TimelineDataSource, document: Document, collapsed: readonly string[] = []): TimelineDataSource {
   const counts = { group: 0, audio: 0, animation: 0, event: 0 };
   const baseRows = base.getRows({ start: 0, count: base.getRowCount() });
-  const tracks = [...document.tracks.filter(track => !track.external), ...document.tracks.filter(track => track.external)].map(({ id, type, label, parentId, external }) => {
+  const tracks = document.tracks.map(({ id, type, label, parentId, external }) => {
     const number = external ? counts[type] : ++counts[type];
     const original = external ? baseRows.find(row => row.id === id) : undefined;
     return { ...original, id, label: label ?? original?.label ?? `${trackTypes[type].label} ${number}`, kind: type === "group" ? "group" as const : "track" as const, depth: 0, color: trackTypes[type].color,
@@ -66,7 +76,7 @@ export function withAudioRows(base: TimelineDataSource, document: Document, coll
     getBindings: () => [...tracks.filter(row => row.bindingId).map(row => ({ id: row.bindingId!, label: row.label, targetKind: row.targetKind })), ...base.getBindings().filter(binding => !tracks.some(row => row.bindingId === binding.id))],
     getRowCount: () => rows.length,
     getRows: ({ start, count }) => rows.slice(start, start + count),
-    getItems: query => [...base.getItems(query).filter(item => item.id !== "preview-animation"), ...document.clips.filter(clip => query.rowIds.includes(clip.rowId) && clip.range.start < query.range.end && clip.range.end > query.range.start)],
+    getItems: query => [...base.getItems(query).filter(item => item.id !== "preview-animation"), ...document.clips.filter(clip => query.rowIds.includes(clip.rowId) && clip.range.start < query.range.end && clip.range.end > query.range.start).map(clip => ({ ...clip, disabled: clip.disabled || !trackEnabled(document, clip.rowId) }))],
   };
 }
 
@@ -124,12 +134,7 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     return { ...value, time: projectTimelinePlaybackTime(value) };
   };
   const typeOf = (clip: TimelineClip) => current.current.tracks.find(track => track.id === clip.rowId)?.type ?? (clip.id === motion?.id ? "animation" : undefined);
-  const enabled = (clip: DemoClip) => {
-    const track = current.current.tracks.find(track => track.id === clip.rowId);
-    let parent = track?.parentId;
-    while (parent) { const group = current.current.tracks.find(item => item.id === parent); if (group?.muted) return false; parent = group?.parentId; }
-    return !clip.disabled && !track?.muted && (!current.current.tracks.some(other => other.solo && other.type === typeOf(clip)) || Boolean(track?.solo));
-  };
+  const enabled = (clip: DemoClip) => !clip.disabled && trackEnabled(current.current, clip.rowId);
   const sync = (force = false) => {
     const value = sample();
     for (const [id, audio] of runtime.current?.sources ?? []) {
@@ -371,6 +376,26 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     if (parentId && collapsed.includes(parentId)) toggleRow(parentId);
     commit({ ...current.current, tracks: current.current.tracks.map(track => track.id === id ? { ...track, parentId: parentId ?? undefined } : track) });
   };
+  const reorderRow = (id: RowId, targetId: RowId, position: "before" | "after") => {
+    const tracks = current.current.tracks;
+    const moving = tracks.find(track => track.id === id);
+    const target = tracks.find(track => track.id === targetId);
+    if (!moving || !target || id === targetId) return;
+    let ancestor = target.parentId;
+    while (ancestor) { if (ancestor === id) return; ancestor = tracks.find(track => track.id === ancestor)?.parentId; }
+    // Persist generated names before reordering, so Audio 1 stays Audio 1.
+    const counts = { group: 0, audio: 0, animation: 0, event: 0 };
+    const named = tracks.map(track => {
+      if (track.external) return track;
+      const number = ++counts[track.type];
+      return { ...track, label: track.label ?? `${trackTypes[track.type].label} ${number}` };
+    });
+    const next = named.filter(track => track.id !== id);
+    const index = next.findIndex(track => track.id === targetId) + (position === "after" ? 1 : 0);
+    next.splice(index, 0, { ...named.find(track => track.id === id)!, parentId: target.parentId });
+    if (next.every((track, i) => track.id === tracks[i].id && track.parentId === tracks[i].parentId)) return;
+    commit({ ...current.current, tracks: next });
+  };
   const rowActions = (row: TimelineRow) => {
     const track = document.tracks.find(track => track.id === row.id);
     if (!track) return null;
@@ -417,5 +442,5 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     <button className="timeline-editor__button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!future.current.length} onClick={redo}>↷</button>
   </>;
   const renameRow = (id: RowId, label: string) => commit({ ...current.current, tracks: current.current.tracks.map(track => track.id === id ? { ...track, label } : track) });
-  return { document, changePlaybackRange, collapsed, toggleRow, moveRow, ready, saving, toolbar, addTrack, rowIcon, rowActions, renameRow, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
+  return { document, changePlaybackRange, collapsed, toggleRow, moveRow, reorderRow, ready, saving, toolbar, addTrack, rowIcon, rowActions, renameRow, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
 }

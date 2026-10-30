@@ -431,3 +431,8 @@ button.timeline-editor__row-disclosure { background: none; border: 0; padding: 0
   .timeline-editor__body { grid-column: 1 / -1; }
   .timeline-editor__inspector { position: absolute; z-index: 20; top: var(--timeline-toolbar-height); right: 0; bottom: 0; width: min(var(--timeline-inspector-width, 15.5rem), 85%); box-shadow: -4px 0 12px #0004; }
 }
+
+.timeline-editor__row[data-drop-position="before"]::after,
+.timeline-editor__row[data-drop-position="after"]::after { content: ""; position: absolute; left: 3px; right: 0; height: 2px; background: var(--timeline-accent); pointer-events: none; z-index: 2; }
+.timeline-editor__row[data-drop-position="before"]::after { top: 0; }
+.timeline-editor__row[data-drop-position="after"]::after { bottom: 0; }

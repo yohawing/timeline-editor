@@ -87,6 +87,7 @@ function Example(): JSX.Element {
           onChangePlaybackRange={audio.changePlaybackRange}
           onRenameRow={stress ? undefined : audio.renameRow}
           onMoveRow={stress ? undefined : audio.moveRow}
+          onReorderRow={stress ? undefined : audio.reorderRow}
           onToggleRow={stress ? undefined : audio.toggleRow}
           showTitle={false}
           playbackController={audio.controller}

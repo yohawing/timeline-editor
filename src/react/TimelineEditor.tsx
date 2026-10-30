@@ -124,6 +124,8 @@ export interface TimelineEditorProps {
   onViewStateChange?: (state: TimelineViewState) => void;
   dataSource: TimelineDataSource;
   editing?: TimelineEditing;
+  /** Request insertion beside a row; the host owns hierarchy, order and undo. */
+  onReorderRow?: (rowId: TimelineRow["id"], targetRowId: TimelineRow["id"], position: "before" | "after") => void;
   onMoveRow?: (rowId: TimelineRow["id"], parentId: TimelineRow["id"] | null) => void;
   onToggleRow?: (rowId: TimelineRow["id"]) => void;
   onRenameRow?: (rowId: TimelineRow["id"], label: string) => void;
@@ -430,6 +432,7 @@ export function TimelineEditor({
   onRenameRow,
   onChangePlaybackRange,
   onMoveRow,
+  onReorderRow,
   onToggleRow,
   initialViewState,
   onViewStateChange,
@@ -1202,7 +1205,7 @@ export function TimelineEditor({
           <div className="timeline-editor__tree-content" style={{ height: totalHeight }}>
             {rows.map((row, index) => {
               const target = rowTargets.get(row.id);
-              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} rowHeight={rowHeight} icon={slots?.rowIcon?.(row)} actions={slots?.rowActions?.(row)} onRename={onRenameRow} onMove={onMoveRow} onToggle={onToggleRow} />;
+              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} rowHeight={rowHeight} icon={slots?.rowIcon?.(row)} actions={slots?.rowActions?.(row)} onRename={onRenameRow} onMove={onMoveRow} onReorder={onReorderRow} onToggle={onToggleRow} />;
             })}
             {rowCount === 0 && <div className="timeline-editor__empty">{slots?.emptyState ?? "No timeline tracks"}</div>}
           </div>
@@ -1317,6 +1320,7 @@ function TimelineRowView({
   actions,
   icon,
   onMove,
+  onReorder,
   onToggle,
   onRename,
 }: {
@@ -1328,10 +1332,19 @@ function TimelineRowView({
   rowHeight: number;
   actions?: ReactNode;
   icon?: ReactNode;
+  onReorder?: TimelineEditorProps["onReorderRow"];
   onMove?: (rowId: TimelineRow["id"], parentId: TimelineRow["id"] | null) => void;
   onToggle?: (rowId: TimelineRow["id"]) => void;
   onRename?: (rowId: TimelineRow["id"], label: string) => void;
 }): ReactElement {
+  const [dropPosition, setDropPosition] = useState<"before" | "after" | "inside" | null>(null);
+  const placement = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes("application/x-timeline-row") || row.locked) return null;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const fraction = (event.clientY - rect.top) / rect.height;
+    if (row.kind === "group" && onMove && (!onReorder || (fraction > 0.25 && fraction < 0.75))) return "inside";
+    return onReorder ? (fraction < 0.5 ? "before" : "after") : null;
+  };
   const targetProps = target ? {
     role: "button" as const,
     tabIndex: 0,
@@ -1347,16 +1360,27 @@ function TimelineRowView({
     },
   } : {};
   return (
-    <div className={`timeline-editor__row timeline-editor__row--${row.kind}${target ? " timeline-editor__row--target" : ""}${selected ? " is-target-selected" : ""}`} draggable={Boolean(onMove && !row.locked)}
-      onDragStart={event => { if ((event.target as HTMLElement).tagName === "INPUT") { event.preventDefault(); return; } event.dataTransfer.setData("application/x-timeline-row", row.id); event.dataTransfer.effectAllowed = "move"; }}
-      onDragOver={event => { if (onMove && row.kind === "group" && event.dataTransfer.types.includes("application/x-timeline-row")) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; event.currentTarget.classList.add("is-drop-target"); } }}
-      onDragLeave={event => event.currentTarget.classList.remove("is-drop-target")}
-      onDrop={event => { event.currentTarget.classList.remove("is-drop-target"); const id = event.dataTransfer.getData("application/x-timeline-row"); if (id && onMove && row.kind === "group") { event.preventDefault(); event.stopPropagation(); onMove(id as TimelineRow["id"], row.id); } }}
+    <div className={`timeline-editor__row timeline-editor__row--${row.kind}${target ? " timeline-editor__row--target" : ""}${selected ? " is-target-selected" : ""}${dropPosition === "inside" ? " is-drop-target" : ""}`}
+      data-depth={row.depth} data-drop-position={dropPosition ?? undefined} draggable={Boolean((onMove || onReorder) && !row.locked)}
+      onDragStart={event => { if ((event.target as HTMLElement).closest("input, button, .timeline-editor__row-actions")) { event.preventDefault(); return; } event.dataTransfer.setData("application/x-timeline-row", row.id); event.dataTransfer.effectAllowed = "move"; }}
+      onDragOver={event => { const position = placement(event); setDropPosition(position); if (position) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }}
+      onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropPosition(null); }}
+      onDragEnd={() => setDropPosition(null)}
+      onDrop={event => {
+        setDropPosition(null);
+        const id = event.dataTransfer.getData("application/x-timeline-row") as TimelineRow["id"];
+        const position = placement(event);
+        if (!id || id === row.id || !position) return;
+        event.preventDefault(); event.stopPropagation();
+        if (position === "inside") onMove?.(id, row.id);
+        else onReorder?.(id, row.id, position);
+      }}
       style={{ transform: `translateY(${index * rowHeight}px)` }} {...(actions || onRename ? {} : targetProps)}>
       <span className="timeline-editor__row-color" style={{ backgroundColor: row.color ?? "#6c7284" }} />
+      <span aria-hidden="true" style={{ flex: `0 0 ${Math.max(0, row.depth) * 16}px` }} />
       {row.kind === "group" && (onToggle ? <button type="button" className="timeline-editor__row-disclosure" title={row.expanded === false ? "Expand group" : "Collapse group"} aria-label={`${row.expanded === false ? "Expand" : "Collapse"} ${row.label}`} aria-expanded={row.expanded !== false} onClick={event => { event.stopPropagation(); onToggle(row.id); }}>{row.expanded === false ? "▸" : "▾"}</button> : <span className="timeline-editor__row-disclosure">▾</span>)}
       {icon && <span className="timeline-editor__row-icon">{icon}</span>}
-      <RowLabel row={row} targetProps={actions || onRename ? targetProps : {}} onRename={onRename} style={{ paddingLeft: `${Math.max(0, row.depth) * 10 * (rowHeight / TIMELINE_ROW_HEIGHT)}px` }} />
+      <RowLabel row={row} targetProps={actions || onRename ? targetProps : {}} onRename={onRename} style={{ paddingLeft: 0 }} />
       {actions && <span className="timeline-editor__row-actions" onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>{actions}</span>}
       {row.bindingId && <span className="timeline-editor__row-binding">{String(row.bindingId).replace(/^binding-/, "")}</span>}
       {row.muted && <span className="timeline-editor__row-state">M</span>}
