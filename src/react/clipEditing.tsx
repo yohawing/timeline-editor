@@ -9,6 +9,8 @@ export interface TimelineEditing {
   /** Defaults to the original row; file-drop eligibility is independent. */
   canMoveClip?(clip: TimelineClip, rowId: RowId): boolean;
   onSelectClip(id: ClipId | null): void;
+  /** Request a host-owned inspector; no panel or state is imposed by the editor. */
+  onOpenClipProperties?(id: ClipId): void;
   onMoveClip(id: ClipId, rowId: RowId, start: number): void;
   onDropFiles(files: readonly File[], rowId: RowId, time: number): void;
   onDelete(): void;
@@ -106,6 +108,7 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
       className={`timeline-editor__editable-clip${editing.selectedClipId === clip.id ? " is-selected" : ""}`}
       title={`${clip.label} · ${start.toFixed(2)} s — ${(start + duration).toFixed(2)} s`}
       style={{ left, top: index * rowHeight + 2, width: visibleWidth, height: rowHeight - 4, backgroundColor: clip.color }}
+      onDoubleClick={event => { event.stopPropagation(); editing.onSelectClip(clip.id); editing.onOpenClipProperties?.(clip.id); }}
       onKeyDown={(event) => { if (event.key === "Enter") { editing.onSelectClip(clip.id); event.preventDefault(); } }}
       onPointerDown={(event) => {
         if (event.button !== 0) return;

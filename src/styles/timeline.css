@@ -160,6 +160,7 @@
 }
 
 .timeline-editor__tree-heading {
+  border-right: 1px solid var(--timeline-divider);
   justify-content: space-between;
   grid-area: tree-heading;
   min-width: 0;

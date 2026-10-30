@@ -137,3 +137,14 @@ The preview is driven by the same host sample as audio, not by an audio clock.
 Browser tests check real WAV decoding and offline PCM offset/rate output; they
 do not measure physical speaker/display latency. Use an audio reference against
 the preview to inspect your device; hardware latency compensation is not applied.
+
+### Clip properties
+
+Double-click an editable clip to open the demo's right-side inspector. Mute and
+Solo are undoable per-clip properties; solo applies within the same media type,
+so soloing audio does not hide animation. Mute takes precedence over solo.
+Audio volume is a linear 0–200% gain; a slider drag is one undo step and keyboard
+steps are individual edits. Gain changes do not restart the audio source.
+The optional `TimelineEditing.onOpenClipProperties(id)` callback requests a
+host-owned inspector. The core does not impose a panel, property schema or solo
+policy. `createTimelineAudio().setVolume(value)` supplies only the gain primitive.

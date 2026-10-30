@@ -11,6 +11,8 @@ export function createTimelineAudio(context: AudioContext, driftTolerance = 0.08
   if (!Number.isFinite(driftTolerance) || driftTolerance <= 0) throw new RangeError("Invalid drift tolerance");
   let buffer: AudioBuffer | null = null;
   let source: AudioBufferSourceNode | null = null;
+  let output: GainNode | null = null;
+  let volume = 1;
   let generation = 0;
   let disposed = false;
   let anchorStart = 0;
@@ -28,6 +30,18 @@ export function createTimelineAudio(context: AudioContext, driftTolerance = 0.08
     }
   };
   return {
+    /** Linear gain, 0..2. Changes gain without restarting playback. */
+    setVolume(value: number): void {
+      if (!Number.isFinite(value) || value < 0 || value > 2) throw new RangeError("Volume must be between 0 and 2");
+      if (disposed || value === volume) return;
+      volume = value;
+      if (!output) {
+        output = context.createGain();
+        output.connect(context.destination);
+        if (source) { source.disconnect(); source.connect(output); }
+      }
+      output.gain.setTargetAtTime(value, context.currentTime, 0.01);
+    },
     /** Returns null for superseded loads. A failed decode preserves the old asset. */
     async load(bytes: ArrayBuffer | Promise<ArrayBuffer>): Promise<{ duration: number; waveform: readonly number[] } | null> {
       if (disposed) throw new Error("Audio follower is disposed");
@@ -72,7 +86,7 @@ export function createTimelineAudio(context: AudioContext, driftTolerance = 0.08
       const node = context.createBufferSource();
       node.buffer = buffer;
       node.playbackRate.value = nextRate;
-      node.connect(context.destination);
+      node.connect(output ?? context.destination);
       anchorStart = start;
       anchorTime = sample.time;
       anchorContext = context.currentTime;
@@ -85,6 +99,6 @@ export function createTimelineAudio(context: AudioContext, driftTolerance = 0.08
       node.start(anchorContext, offset, Math.min(buffer.duration - offset, boundary - sample.time));
     },
     clear(): void { ++generation; stop(); buffer = null; },
-    dispose(): void { disposed = true; ++generation; stop(); buffer = null; },
+    dispose(): void { disposed = true; ++generation; stop(); buffer = null; output?.disconnect(); output = null; },
   };
 }

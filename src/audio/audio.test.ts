@@ -8,6 +8,7 @@ function fixture() {
   const context = {
     currentTime: 0, state: "running", destination: {},
     decodeAudioData: vi.fn(async () => ({ duration: 20, length: 0, numberOfChannels: 0 } as AudioBuffer)),
+    createGain: vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn(), gain: { setTargetAtTime: vi.fn() } })),
     createBufferSource: () => {
       const node = { start: vi.fn(), stop: vi.fn(), connect: vi.fn(), disconnect: vi.fn(), playbackRate: { value: 1 }, onended: null };
       nodes.push(node); return node;
@@ -17,6 +18,17 @@ function fixture() {
   return { audio, context, nodes };
 }
 describe("audio follows the host clock", () => {
+  it("updates gain without restarting the source and releases it on dispose", async () => {
+    const { audio, context, nodes } = fixture(); await audio.load(new ArrayBuffer(0));
+    audio.sync(sample(0)); audio.setVolume(0.25); audio.sync(sample(0));
+    expect(nodes).toHaveLength(1);
+    const gain = context.createGain.mock.results[0].value;
+    expect(gain.gain.setTargetAtTime).toHaveBeenCalledWith(0.25, 0, 0.01);
+    audio.setVolume(0.25); expect(gain.gain.setTargetAtTime).toHaveBeenCalledTimes(1);
+    expect(() => audio.setVolume(Number.NaN)).toThrow(RangeError);
+    expect(() => audio.setVolume(-1)).toThrow(RangeError);
+    audio.dispose(); expect(gain.disconnect).toHaveBeenCalled();
+  });
   it("starts only inside the placed clip and resyncs after moving it", async () => {
     const { audio, nodes } = fixture(); await audio.load(new ArrayBuffer(0));
     audio.sync(sample(1), false, { start: 3, end: 8 }); expect(nodes).toHaveLength(0);

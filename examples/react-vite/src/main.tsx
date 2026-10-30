@@ -34,7 +34,7 @@ function createMalformedPlaybackController(): TimelinePlaybackController {
 function createPreviewTimeline(): TimelineDataSource {
   const base = createFixtureTimelineDataSource();
   const row = base.getRows({ start: 0, count: base.getRowCount() }).find(row => row.label === "Root Motion")!;
-  return { ...base, getRowCount: () => 1, getRows: ({ start, count }) => [row].slice(start, start + count),
+  return { ...base, getRowCount: () => 1, getRows: ({ start, count }) => [{ ...row, depth: 0, groupId: undefined }].slice(start, start + count),
     getGroups: () => [], getKeys: () => [], getKeyColumns: () => [],
     getItems: query => query.rowIds.includes(row.id) ? [{ kind: "clip", id: timelineId<"clip">("preview-animation"), rowId: row.id, label: "Animation", range: { start: 0, end: 12 }, color: "#58658d" }] : [],
   };
@@ -63,7 +63,7 @@ function Example(): JSX.Element {
   const audio = useAudioDemo(playbackController, motion);
   const audioData = useMemo(() => withAudioRows(dataSource, audio.document), [dataSource, audio.document]);
   return (
-    <main className="example-shell">
+    <main className={`example-shell${audio.properties ? " has-properties" : ""}`}>
       <div className="example-preview" onPointerDown={() => document.querySelector<HTMLElement>(".timeline-editor__viewport")?.focus()}>
         <canvas ref={audio.preview} aria-label="Animation preview" />
       </div>
@@ -85,6 +85,7 @@ function Example(): JSX.Element {
         />
         {audio.error && <div className="example-error" role="alert">{audio.error}<button aria-label="Dismiss error" onClick={audio.dismissError}>×</button></div>}
       </div>
+      {audio.properties}
     </main>
   );
 }
