@@ -392,7 +392,7 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     return <>
       <button className="example-track-action" aria-label={`Mute ${row.label}`} aria-pressed={track.muted ?? false} title="Mute track" onClick={() => toggle("muted")}>M</button>
       <button className="example-track-action" aria-label={`Solo ${row.label}`} aria-pressed={track.solo ?? false} title="Solo track (same media type)" onClick={() => toggle("solo")}>S</button>
-      <button className="example-track-action" aria-label={`Add clip to ${row.label}`} disabled={sample().time >= (sample().range?.end ?? sample().duration)} title="Add clip at playhead (inside playback range)" onClick={addClip}><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg></button>
+      <button className="example-track-action" aria-label={`Add clip to ${row.label}`} disabled={sample().time >= (sample().range?.end ?? sample().duration)} title="Add clip at playhead (inside playback range)" onClick={addClip}><svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg></button>
     </>;
   };
   const filePicker = <input hidden ref={fileInput} type="file" accept="audio/*" multiple aria-label="Add audio clips" onChange={event => {

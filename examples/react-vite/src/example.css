@@ -33,7 +33,7 @@ body { background: #101216; color: #d6d6dc; font: 13px Inter, "Segoe UI", sans-s
 .example-track-menu button { display: block; width: 100%; border: 0; border-radius: 2px; padding: 7px 10px; text-align: left; background: transparent; color: #e0e5ee; cursor: pointer; }
 .example-track-menu button:hover, .example-track-menu button:focus-visible { background: #3b485f; outline: none; }
 
-.example-track-action { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; color: #8995a8; border-radius: 3px; cursor: pointer; font-size: var(--timeline-track-font-size, 0.75rem); font-weight: 600; }
+.example-track-action { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; color: #8995a8; border-radius: 3px; cursor: pointer; font-size: var(--timeline-track-font-size, 0.65rem); font-weight: 600; }
 .example-track-action:hover, .example-track-action:focus-visible { background: #3a4454; color: #edf2fa; }
 .example-track-action[aria-pressed="true"] { background: #68502a; color: #ffe0a0; }
 

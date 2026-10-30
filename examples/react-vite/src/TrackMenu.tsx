@@ -8,7 +8,7 @@ export function TrackMenu({ options, onAdd, label = "Add track" }: { label?: str
   return <>
     <button ref={trigger} className="example-add-track" aria-label={label} title={label} popoverTarget={id} aria-haspopup="menu"
       onClick={() => { const box = trigger.current!.getBoundingClientRect(); setPosition({ left: Math.max(4, box.right - 160), top: box.bottom + 3 }); }}>
-      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
+      <svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
     </button>
     <div ref={menu} id={id} popover="auto" role="menu" aria-label="Track types" className="example-track-menu" style={position}
       onToggle={event => { if ((event.nativeEvent as ToggleEvent).newState === "open") menu.current?.querySelector("button")?.focus(); }}

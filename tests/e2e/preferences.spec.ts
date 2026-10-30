@@ -3,9 +3,9 @@ import { test, expect } from "@playwright/test";
 test("track names edit with commit and cancel; controls stay legible and labelled", async ({ page }) => {
   await page.goto("/");
   const label = page.locator(".timeline-editor__row-label").filter({ hasText: "Root Motion" });
-  await expect(label).toHaveCSS("font-size", "12px");
+  await expect(label).toHaveCSS("font-size", "10.4px");
   await expect(label).toHaveCSS("font-weight", "600");
-  await expect(page.getByRole("button", { name: "Mute Root Motion", exact: true })).toHaveCSS("font-size", "12px");
+  await expect(page.getByRole("button", { name: "Mute Root Motion", exact: true })).toHaveCSS("font-size", "10.4px");
   const geometry = await label.evaluate(element => {
     const strip = element.parentElement!.querySelector(".timeline-editor__row-color")!.getBoundingClientRect();
     const row = element.parentElement!.getBoundingClientRect();

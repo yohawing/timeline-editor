@@ -165,7 +165,7 @@ not an additional TimelineEditor API.
 
 Track labels support optional `onRenameRow(rowId, label)` for double-click editing
 (Enter/blur commits, Escape cancels, blank labels are ignored). The host owns
-renaming and undo. `--timeline-track-font-size` adjusts label text (default 0.75rem).
+renaming and undo. `--timeline-track-font-size` adjusts label text (default 0.65rem).
 
 Use `initialViewState` and `onViewStateChange` to restore and observe track width,
 time zoom, row zoom, Snap and frames/seconds display preferences. Initial values
