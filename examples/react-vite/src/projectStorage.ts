@@ -9,10 +9,25 @@ export interface SavedProject {
 function validProject(value: SavedProject): boolean {
   if (value.version !== 1 || !Array.isArray(value.document?.tracks) || !Array.isArray(value.document?.clips) || !Array.isArray(value.audio)) return false;
   const { tracks, clips } = value.document;
-  if (!tracks.every(track => track && typeof track.id === "string" && ["audio", "animation", "event"].includes(track.type))) return false;
+  if (!tracks.every(track => track && typeof track.id === "string" && ["group", "audio", "animation", "event"].includes(track.type))) return false;
+  for (const track of tracks) {
+    const visited = new Set<string>([track.id]);
+    let parent = track.parentId;
+    while (parent) {
+      if (visited.has(parent)) return false;
+      visited.add(parent);
+      const group = tracks.find(item => item.id === parent);
+      if (!group || group.type !== "group") return false;
+      parent = group.parentId;
+    }
+  }
+  const range = value.document.playbackRange;
+  if (range && (!Number.isFinite(range.start) || !Number.isFinite(range.end) || range.end <= range.start)) return false;
   if (new Set(tracks.map(track => track.id)).size !== tracks.length || new Set(clips.map(clip => clip?.id)).size !== clips.length) return false;
   if (!clips.every(clip => clip && clip.kind === "clip" && typeof clip.id === "string" && typeof clip.label === "string" && tracks.some(track => track.id === clip.rowId)
     && Number.isFinite(clip.range?.start) && Number.isFinite(clip.range?.end) && clip.range.end > clip.range.start
+    && (clip.sourceOffset === undefined || (Number.isFinite(clip.sourceOffset) && clip.sourceOffset >= 0))
+    && (clip.sourceDuration === undefined || (Number.isFinite(clip.sourceDuration) && clip.sourceDuration > 0))
     && (clip.waveform === undefined || (Array.isArray(clip.waveform) && clip.waveform.every(Number.isFinite))))) return false;
   if (!value.audio.every(entry => Array.isArray(entry) && typeof entry[0] === "string" && entry[1] instanceof Blob)) return false;
   const audioIds = new Set(value.audio.map(([id]) => id));

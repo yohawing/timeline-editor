@@ -16,6 +16,8 @@ export function createTimelineAudio(context: AudioContext, driftTolerance = 0.08
   let generation = 0;
   let disposed = false;
   let anchorStart = 0;
+  let anchorOffset = 0;
+  let anchorLoop = false;
   let anchorTime = 0;
   let anchorContext = 0;
   let rate = 1;
@@ -60,10 +62,11 @@ export function createTimelineAudio(context: AudioContext, driftTolerance = 0.08
     },
     /** Call each host frame, and immediately after operations. Set discontinuity
      * for explicit seeks (including seeks smaller than the drift tolerance).
-     * No wall-clock projection is performed here. Audio zero is placement.start
-     * when supplied, otherwise range.start. Placement end stops this clip.
+     * No wall-clock projection is performed here. sourceOffset is the media time
+     * at placement.start (default zero); loop repeats the full source.
+     * Placement end or the transport boundary stops this clip.
      */
-    sync(sample: TimelinePlaybackSnapshot, discontinuity = false, placement?: TimeRange): void {
+    sync(sample: TimelinePlaybackSnapshot, discontinuity = false, placement?: TimeRange & { sourceOffset?: number; loop?: boolean }): void {
       if (disposed) return;
       const timelineStart = sample.range?.start ?? 0;
       const start = placement?.start ?? timelineStart;
@@ -71,23 +74,28 @@ export function createTimelineAudio(context: AudioContext, driftTolerance = 0.08
       const nextRate = sample.rate ?? 1;
       const loop = sample.looping ? clampTimelineLoopRange(sample.loopRange, { start: timelineStart, end: finish }) : null;
       const boundary = Math.min(loop?.end ?? finish, placement?.end ?? finish);
-      const offset = sample.time - start;
+      const elapsed = sample.time - start;
+      const sourceOffset = placement?.sourceOffset ?? 0;
+      const looping = placement?.loop ?? false;
+      const mediaTime = elapsed + sourceOffset;
+      const offset = looping && buffer ? mediaTime % buffer.duration : mediaTime;
       const backwards = sample.time < lastTime;
       lastTime = sample.time;
       if (!buffer || !sample.available || !sample.playing || context.state !== "running" ||
           ![start, finish, boundary, sample.time, nextRate].every(Number.isFinite) || nextRate <= 0 ||
-          offset < 0 || offset >= buffer.duration || sample.time >= boundary) {
+          elapsed < 0 || !Number.isFinite(sourceOffset) || sourceOffset < 0 || offset < 0 || offset >= buffer.duration || sample.time >= boundary) {
         stop(); return;
       }
       const predicted = anchorTime + (context.currentTime - anchorContext) * rate;
-      if (source && !discontinuity && !backwards && nextRate === rate && boundary === end && start === anchorStart &&
+      if (source && !discontinuity && !backwards && nextRate === rate && boundary === end && start === anchorStart && sourceOffset === anchorOffset && looping === anchorLoop &&
           Math.abs(predicted - sample.time) <= driftTolerance) return;
       stop();
       const node = context.createBufferSource();
       node.buffer = buffer;
+      node.loop = looping;
       node.playbackRate.value = nextRate;
       node.connect(output ?? context.destination);
-      anchorStart = start;
+      anchorStart = start; anchorOffset = sourceOffset; anchorLoop = looping;
       anchorTime = sample.time;
       anchorContext = context.currentTime;
       rate = nextRate;
@@ -96,7 +104,7 @@ export function createTimelineAudio(context: AudioContext, driftTolerance = 0.08
       // Retain the ended source as an anchor until the host reaches the end,
       // wraps, seeks or drifts. A slightly late sample must not replay the tail.
       node.onended = () => { node.disconnect(); };
-      node.start(anchorContext, offset, Math.min(buffer.duration - offset, boundary - sample.time));
+      node.start(anchorContext, offset, looping ? boundary - sample.time : Math.min(buffer.duration - offset, boundary - sample.time));
     },
     clear(): void { ++generation; stop(); buffer = null; },
     dispose(): void { disposed = true; ++generation; stop(); buffer = null; output?.disconnect(); output = null; },

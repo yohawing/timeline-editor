@@ -280,10 +280,10 @@ describe("TimelineEditor transport and interaction boundary", () => {
     const root = document.querySelector(".timeline-editor") as HTMLElement;
     const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
     expect(root.style.getPropertyValue("--timeline-row-zoom")).toBe("1");
-    fireEvent(viewport, new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true }));
+    fireEvent(viewport, new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true }));
     const zoomed = Number(root.style.getPropertyValue("--timeline-row-zoom"));
     expect(zoomed).toBeGreaterThan(1);
-    fireEvent(viewport, new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true }));
+    fireEvent(viewport, new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true }));
     expect(Number(root.style.getPropertyValue("--timeline-row-zoom"))).toBeCloseTo(1, 6);
   });
 
@@ -293,16 +293,16 @@ describe("TimelineEditor transport and interaction boundary", () => {
     const content = document.querySelector(".timeline-editor__content") as HTMLDivElement;
     const startWidth = parseFloat(content.style.width);
     act(() => {
-      for (let i = 0; i < 3; i++) fireEvent(viewport, new WheelEvent("wheel", { deltaY: 100, bubbles: true, cancelable: true }));
+      for (let i = 0; i < 3; i++) fireEvent(viewport, new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true }));
     });
-    // Three notches of +100px (wheel down = zoom in): exp(0.0015 * 300) ~= 1.568x, not a single notch's 1.16x.
+    // Three notches of -100px (wheel up = zoom in): exp(0.0015 * 300) ~= 1.568x, not a single notch's 1.16x.
     expect(parseFloat(content.style.width) / startWidth).toBeCloseTo(Math.exp(0.45), 3);
   });
 
   it("does not throw on plain / Shift wheel and exposes the view range thumb", () => {
     render(<TimelineEditor dataSource={source()} frameRate={24} />);
     const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
-    const wheel = new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true });
+    const wheel = new WheelEvent("wheel", { deltaY: 100, bubbles: true, cancelable: true });
     fireEvent(viewport, wheel);
     expect(wheel.defaultPrevented).toBe(true);
     const thumb = screen.getByRole("scrollbar", { name: "Timeline view range" });
@@ -405,4 +405,14 @@ it("restores view preferences and does not emit again when only callback identit
   changed.mockClear();
   rerender(<TimelineEditor dataSource={dataSource} onViewStateChange={state => changed(state)} />);
   expect(changed).not.toHaveBeenCalled();
+});
+
+it("group disclosure does not submit its host form", () => {
+  const submit = vi.fn(event => event.preventDefault());
+  const toggle = vi.fn();
+  const data = source();
+  render(<form onSubmit={submit}><TimelineEditor dataSource={{ ...data, getRows: () => [{ id: rowId, label: "Group", kind: "group", depth: 0, expanded: true }] }} onToggleRow={toggle} /></form>);
+  fireEvent.click(screen.getByRole("button", { name: "Collapse Group" }));
+  expect(toggle).toHaveBeenCalledWith(rowId);
+  expect(submit).not.toHaveBeenCalled();
 });

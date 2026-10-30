@@ -148,3 +148,16 @@ describe("transport-neutral playback controller", () => {
     expect(projectTimelinePlaybackTime(snapshot, 2_500)).toBe(3.5);
   });
 });
+
+it("changes playback bounds independently and clamps seek and looping", () => {
+  const controller = createLocalPlaybackController(12);
+  controller.dispatch({ type: "setPlaybackRange", range: { start: 3, end: 8 }, target: { instanceId: "new", clipIndex: 2 } });
+  expect(controller.getSnapshot().target).toEqual({ instanceId: "new", clipIndex: 2 });
+  expect(controller.getSnapshot()).toMatchObject({ time: 3, duration: 5, range: { start: 3, end: 8 } });
+  controller.dispatch({ type: "seek", time: 20, target: null });
+  expect(controller.getSnapshot().time).toBe(8);
+  controller.dispatch({ type: "setLoopRange", range: { start: 1, end: 10 }, target: null });
+  expect(controller.getSnapshot().loopRange).toEqual({ start: 3, end: 8 });
+  expect(() => controller.dispatch({ type: "setPlaybackRange", range: { start: 8, end: 3 }, target: null })).toThrow();
+  expect(controller.getSnapshot().range).toEqual({ start: 3, end: 8 });
+});

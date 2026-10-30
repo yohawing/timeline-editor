@@ -1,9 +1,10 @@
 import { readProject, writeProject, type SavedProject } from "./projectStorage";
+import { TimeField } from "./TimeField";
 import { TrackIcon } from "./TrackIcon";
 import { TrackMenu } from "./TrackMenu";
 import { useEffect, useRef, useState } from "react";
 import { createTimelineAudio } from "@yohawing/timeline-editor/audio";
-import { projectTimelinePlaybackTime, timelineId, type TimelineClip, type RowId, type TimelineRow, type TimelineDataSource, type TimelinePlaybackController } from "@yohawing/timeline-editor/core";
+import { projectTimelinePlaybackTime, timelineId, type TimeRange, type TimelineClip, type RowId, type TimelineRow, type TimelineDataSource, type TimelinePlaybackController } from "@yohawing/timeline-editor/core";
 import type { TimelineEditing } from "@yohawing/timeline-editor";
 export { createTimelineAudio };
 
@@ -27,37 +28,58 @@ export function clickTrack(): ArrayBuffer {
 
 
 const trackTypes = {
+  group: { label: "Group", color: "#a5a9b3", targetKind: "actor" },
   audio: { label: "Audio", color: "#55bca9", targetKind: "audio-output" },
   animation: { label: "Animation", color: "#8592d0", targetKind: "actor" },
   event: { label: "Event", color: "#dbb56e", targetKind: "property" },
 } as const;
 type TrackType = keyof typeof trackTypes;
-interface Track { id: RowId; type: TrackType; label?: string; external?: boolean; muted?: boolean; solo?: boolean }
+interface Track { parentId?: RowId; id: RowId; type: TrackType; label?: string; external?: boolean; muted?: boolean; solo?: boolean }
 interface DemoClip extends TimelineClip { disabled?: boolean; volume?: number }
-export interface Document { tracks: readonly Track[]; clips: readonly DemoClip[] }
+export interface Document { playbackRange?: TimeRange; tracks: readonly Track[]; clips: readonly DemoClip[] }
 const firstTrack: Track = { id: timelineId<"row">("audio-track-1"), type: "audio" };
 const isAudioTrack = (document: Document, id: RowId) => document.tracks.some(track => track.id === id && track.type === "audio");
 
-export function withAudioRows(base: TimelineDataSource, document: Document): TimelineDataSource {
-  const counts = { audio: 0, animation: 0, event: 0 };
-  const tracks = document.tracks.filter(track => !track.external).map(({ id, type, label }) => {
-    const number = ++counts[type];
-    return { id, label: label ?? `${trackTypes[type].label} ${number}`, kind: "track" as const, depth: 0, color: trackTypes[type].color, bindingId: timelineId<"binding">(id), targetKind: trackTypes[type].targetKind };
+export function withAudioRows(base: TimelineDataSource, document: Document, collapsed: readonly string[] = []): TimelineDataSource {
+  const counts = { group: 0, audio: 0, animation: 0, event: 0 };
+  const baseRows = base.getRows({ start: 0, count: base.getRowCount() });
+  const tracks = [...document.tracks.filter(track => !track.external), ...document.tracks.filter(track => track.external)].map(({ id, type, label, parentId, external }) => {
+    const number = external ? counts[type] : ++counts[type];
+    const original = external ? baseRows.find(row => row.id === id) : undefined;
+    return { ...original, id, label: label ?? original?.label ?? `${trackTypes[type].label} ${number}`, kind: type === "group" ? "group" as const : "track" as const, depth: 0, color: trackTypes[type].color,
+      bindingId: type === "group" ? undefined : original?.bindingId ?? timelineId<"binding">(id), targetKind: trackTypes[type].targetKind,
+      groupId: parentId ? timelineId<"group">(parentId) : undefined, expanded: !collapsed.includes(id), parentId };
   });
+  const rows: TimelineRow[] = [];
+  const visit = (parentId: RowId | undefined, depth: number) => {
+    for (const row of tracks.filter(row => row.parentId === parentId)) {
+      rows.push({ ...row, depth });
+      if (row.kind === "group" && row.expanded) visit(row.id, depth + 1);
+    }
+  };
+  visit(undefined, 0);
+  rows.push(...baseRows.filter(row => !document.tracks.some(track => track.id === row.id)));
   return {
     ...base,
-    getBindings: () => [...tracks.map(row => ({ id: row.bindingId, label: row.label, targetKind: row.targetKind })), ...base.getBindings()],
-    getRowCount: () => tracks.length + base.getRowCount(),
-    getRows: ({ start, count }) => {
-      const audio = tracks.slice(start, start + count);
-      return [...audio, ...base.getRows({ start: Math.max(0, start - tracks.length), count: Math.max(0, count - audio.length) }).map(row => ({ ...row, label: document.tracks.find(track => track.id === row.id)?.label ?? row.label }))];
-    },
+    getRange: () => ({ start: Math.min(base.getRange().start, document.playbackRange?.start ?? 0, ...document.clips.map(clip => clip.range.start)), end: Math.max(base.getRange().end, document.playbackRange?.end ?? 12, ...document.clips.map(clip => clip.range.end)) }),
+    getGroups: () => [...base.getGroups(), ...tracks.filter(row => row.kind === "group").map(row => ({ id: timelineId<"group">(row.id), label: row.label, color: row.color }))],
+    getBindings: () => [...tracks.filter(row => row.bindingId).map(row => ({ id: row.bindingId!, label: row.label, targetKind: row.targetKind })), ...base.getBindings().filter(binding => !tracks.some(row => row.bindingId === binding.id))],
+    getRowCount: () => rows.length,
+    getRows: ({ start, count }) => rows.slice(start, start + count),
     getItems: query => [...base.getItems(query).filter(item => item.id !== "preview-animation"), ...document.clips.filter(clip => query.rowIds.includes(clip.rowId) && clip.range.start < query.range.end && clip.range.end > query.range.start)],
   };
 }
 
 export function useAudioDemo(controller: TimelinePlaybackController, motion: TimelineClip | null) {
-  const [document, setDocument] = useState<Document>({ tracks: [firstTrack, ...(motion ? [{ id: motion.rowId, type: "animation" as const, external: true }] : [])], clips: motion ? [motion] : [] });
+  const [document, setDocument] = useState<Document>({ tracks: [firstTrack, ...(motion ? [{ id: motion.rowId, type: "animation" as const, external: true }] : [])], clips: motion ? [{ ...motion, sourceDuration: 12 }] : [] });
+  const [collapsed, setCollapsed] = useState<string[]>(() => {
+    try { const value = JSON.parse(localStorage.getItem("timeline-editor.demo.groups.ui.v1") ?? "[]"); return Array.isArray(value) ? value.filter(item => typeof item === "string") : []; } catch { return []; }
+  });
+  const toggleRow = (id: RowId) => { setSelected(null); setInspectorId(null); setCollapsed(current => {
+    const next = current.includes(id) ? current.filter(value => value !== id) : [...current, id];
+    try { localStorage.setItem("timeline-editor.demo.groups.ui.v1", JSON.stringify(next)); } catch { /* optional UI storage */ }
+    return next;
+  }); };
   const current = useRef(document);
   const past = useRef<Document[]>([]);
   const future = useRef<Document[]>([]);
@@ -102,6 +124,8 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
   const typeOf = (clip: TimelineClip) => current.current.tracks.find(track => track.id === clip.rowId)?.type ?? (clip.id === motion?.id ? "animation" : undefined);
   const enabled = (clip: DemoClip) => {
     const track = current.current.tracks.find(track => track.id === clip.rowId);
+    let parent = track?.parentId;
+    while (parent) { const group = current.current.tracks.find(item => item.id === parent); if (group?.muted) return false; parent = group?.parentId; }
     return !clip.disabled && !track?.muted && (!current.current.tracks.some(other => other.solo && other.type === typeOf(clip)) || Boolean(track?.solo));
   };
   const sync = (force = false) => {
@@ -109,10 +133,18 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     for (const [id, audio] of runtime.current?.sources ?? []) {
       const clip = current.current.clips.find(clip => clip.id === id);
       audio.setVolume(clip?.volume ?? 1);
-      audio.sync(clip && enabled(clip) ? value : { ...value, playing: false }, force, clip?.range);
+      audio.sync(clip && enabled(clip) ? value : { ...value, playing: false }, force, clip ? { ...clip.range, sourceOffset: clip.sourceOffset, loop: clip.loop } : undefined);
+    }
+  };
+  const applyPlaybackRange = (next: Document) => {
+    if (!next.playbackRange) return;
+    const range = controller.getSnapshot().range;
+    if (range?.start !== next.playbackRange.start || range?.end !== next.playbackRange.end) {
+      void Promise.resolve(controller.dispatch({ type: "setPlaybackRange", range: next.playbackRange, target: null })).catch(report);
     }
   };
   const publish = (next: Document) => {
+    applyPlaybackRange({ ...next, playbackRange: next.playbackRange ?? { start: 0, end: 12 } });
     current.current = next; setDocument(next); sync(); persist(next);
     const retained = new Set([...past.current, next, ...future.current].flatMap(doc => doc.clips.map(clip => clip.id as string)));
     for (const [id, audio] of runtime.current?.sources ?? []) {
@@ -149,7 +181,7 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
           const decoded = await audio.load(file.arrayBuffer());
           if (!decoded || ticket !== epoch.current || !isAudioTrack(current.current, rowId)) { audio.dispose(); return null; }
           const id = timelineId<"clip">(`audio-clip-${crypto.randomUUID()}`);
-          return { audio, file, clip: { kind: "clip" as const, id, rowId, label: file.name, color: "#3c8d94", range: { start, end: start + decoded.duration }, waveform: decoded.waveform } };
+          return { audio, file, clip: { kind: "clip" as const, id, rowId, label: file.name, color: "#3c8d94", range: { start, end: start + decoded.duration }, sourceDuration: decoded.duration, waveform: decoded.waveform } };
         } catch (reason) { audio.dispose(); reportLoad(reason); return null; }
       }));
       if (ticket !== epoch.current || !isAudioTrack(current.current, rowId)) { loaded.forEach(item => item?.audio.dispose()); return; }
@@ -170,7 +202,7 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
         canPersist.current = true;
         if (saved) {
           assets.current = new Map(saved.audio);
-          current.current = saved.document; setDocument(saved.document);
+          current.current = saved.document; setDocument(saved.document); applyPlaybackRange(saved.document);
           past.current = []; future.current = [];
           if (saved.audio.length) {
             const owner = { context: new AudioContext(), sources: new Map<string, ReturnType<typeof createTimelineAudio>>() };
@@ -178,8 +210,9 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
             for (const [id, blob] of saved.audio) {
               const audio = createTimelineAudio(owner.context);
               try {
-                await audio.load(blob.arrayBuffer());
+                const decoded = await audio.load(blob.arrayBuffer());
                 if (ticket !== epoch.current) { audio.dispose(); return; }
+                if (decoded) { current.current = { ...current.current, clips: current.current.clips.map(clip => clip.id === id ? { ...clip, sourceDuration: decoded.duration } : clip) }; setDocument(current.current); }
                 owner.sources.set(id, audio);
               } catch (reason) {
                 audio.dispose();
@@ -219,7 +252,9 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
         context.beginPath(); context.moveTo(0, floor); context.lineTo(width, floor); context.stroke();
         const animations = current.current.clips.filter(clip => typeOf(clip) === "animation" && enabled(clip));
         const motionClip = [...animations].reverse().find(clip => value.time >= clip.range.start && value.time < clip.range.end);
-        const motionTime = motionClip ? Math.max(0, Math.min(motionClip.range.end - motionClip.range.start, value.time - motionClip.range.start)) : 0;
+        const sourceTime = motionClip ? value.time - motionClip.range.start + (motionClip.sourceOffset ?? 0) : 0;
+        const sourceDuration = motionClip?.sourceDuration ?? 12;
+        const motionTime = motionClip?.loop ? sourceTime % sourceDuration : Math.min(sourceDuration, sourceTime);
         canvas.dataset.motionTime = motionTime.toFixed(3);
         const phase = motionTime % 1;
         const x = width * (0.15 + motionTime / 12 * 0.7);
@@ -248,6 +283,15 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
       await controller.dispatch(command); await resumed; sync(command.type === "seek");
     },
   };
+  const resizeClip = (id: TimelineClip["id"], range: TimeRange) => {
+    const old = current.current.clips.find(clip => clip.id === id);
+    if (!old || !Number.isFinite(range.start) || !Number.isFinite(range.end) || range.end <= range.start) return;
+    const sourceDuration = old.sourceDuration ?? (typeOf(old) === "animation" ? 12 : undefined);
+    const offset = (old.sourceOffset ?? 0) + range.start - old.range.start;
+    if (offset < 0 || (!old.loop && sourceDuration !== undefined && offset + range.end - range.start > sourceDuration + 1e-8)) return;
+    if (old.range.start === range.start && old.range.end === range.end) return;
+    commit({ ...current.current, clips: current.current.clips.map(clip => clip.id === id ? { ...clip, range, sourceOffset: offset, sourceDuration } : clip) });
+  };
   const editing: TimelineEditing = {
     selectedClipId: selected,
     canEditClip: clip => document.clips.some(item => item.id === clip.id),
@@ -256,6 +300,7 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     onSelectClip: setSelected,
     onOpenClipProperties: setInspectorId,
     onDropFiles: (files, rowId, time) => { setError(""); void load(files, rowId, time); },
+    onResizeClip: resizeClip,
     onMoveClip: (id, rowId, start) => {
       const old = current.current.clips.find(clip => clip.id === id);
       if (!old || !canMove(old, rowId) || (old.range.start === start && old.rowId === rowId)) return;
@@ -268,10 +313,16 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     onUndo: undo, onRedo: redo,
   };
   const inspected = document.clips.find(clip => clip.id === inspectorId);
-  const updateProperties = (id: TimelineClip["id"], patch: Partial<Pick<DemoClip, "disabled" | "volume">>) => {
+  const updateProperties = (id: TimelineClip["id"], patch: Partial<Pick<DemoClip, "disabled" | "volume" | "loop">>) => {
     const old = current.current.clips.find(clip => clip.id === id);
     if (!old || Object.entries(patch).every(([key, value]) => old[key as keyof DemoClip] === value)) return;
-    const next = { ...current.current, clips: current.current.clips.map(clip => clip.id === id ? { ...clip, ...patch } : clip) };
+    const updated = { ...old, ...patch };
+    if (patch.loop === false && old.sourceDuration !== undefined) {
+      const sourceOffset = (old.sourceOffset ?? 0) % old.sourceDuration;
+      updated.sourceOffset = sourceOffset;
+      updated.range = { start: old.range.start, end: Math.min(old.range.end, old.range.start + old.sourceDuration - sourceOffset) };
+    }
+    const next = { ...current.current, clips: current.current.clips.map(clip => clip.id === id ? updated : clip) };
     if (volumeStart.current?.id === id && "volume" in patch) publish(next); else commit(next);
   };
   const finishVolume = (cancelled = false) => {
@@ -286,8 +337,12 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
   const properties = inspected && <aside className="example-properties" aria-label="Clip properties">
     <header><strong>Properties</strong><button aria-label="Close properties" title="Close" onClick={() => setInspectorId(null)}>×</button></header>
     <div className="example-property-name" title={inspected.label}>{inspected.label}</div>
-    <dl><dt>Start</dt><dd>{inspected.range.start.toFixed(3)} s</dd><dt>Duration</dt><dd>{(inspected.range.end - inspected.range.start).toFixed(3)} s</dd></dl>
+    <dl><dt>Start</dt><dd><TimeField label="Clip start" value={inspected.range.start} onCommit={start => resizeClip(inspected.id, { ...inspected.range, start })} /></dd>
+      <dt>End</dt><dd><TimeField label="Clip end" value={inspected.range.end} onCommit={end => resizeClip(inspected.id, { ...inspected.range, end })} /></dd>
+      <dt>Duration</dt><dd>{(inspected.range.end - inspected.range.start).toFixed(3)} s</dd>
+      <dt>Source offset</dt><dd>{(inspected.sourceOffset ?? 0).toFixed(3)} s</dd></dl>
     <div className="example-property-toggles">
+      {typeOf(inspected) !== "event" && <label><input type="checkbox" checked={inspected.loop ?? false} onChange={event => updateProperties(inspected.id, { loop: event.target.checked })} />Loop</label>}
       <label><input type="checkbox" checked={inspected.disabled ?? false} onChange={event => updateProperties(inspected.id, { disabled: event.target.checked })} />Disable</label>
     </div>
     {typeOf(inspected) === "audio" && <label className="example-property-volume">Volume <output>{Math.round((inspected.volume ?? 1) * 100)}%</output>
@@ -298,6 +353,20 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
         onBlur={() => finishVolume()} />
     </label>}
   </aside>;
+  const addTrackOfType = (value: string, parentId?: RowId) => {
+    if (parentId && collapsed.includes(parentId)) toggleRow(parentId);
+    const type = value as TrackType;
+    if (Object.prototype.hasOwnProperty.call(trackTypes, type)) commit({ ...current.current, tracks: [...current.current.tracks, { id: timelineId<"row">(`${type}-track-${crypto.randomUUID()}`), type, parentId }] });
+  };
+  const moveRow = (id: RowId, parentId: RowId | null) => {
+    const track = current.current.tracks.find(track => track.id === id);
+    if (!track || id === parentId || track.parentId === (parentId ?? undefined)) return;
+    if (parentId && !current.current.tracks.some(track => track.id === parentId && track.type === "group")) return;
+    let ancestor = parentId;
+    while (ancestor) { if (ancestor === id) return; ancestor = current.current.tracks.find(track => track.id === ancestor)?.parentId ?? null; }
+    if (parentId && collapsed.includes(parentId)) toggleRow(parentId);
+    commit({ ...current.current, tracks: current.current.tracks.map(track => track.id === id ? { ...track, parentId: parentId ?? undefined } : track) });
+  };
   const rowActions = (row: TimelineRow) => {
     const track = document.tracks.find(track => track.id === row.id);
     if (!track) return null;
@@ -310,10 +379,14 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
         fileTarget.current = { rowId: row.id, time }; fileInput.current?.click();
       } else {
         const id = timelineId<"clip">(`clip-${crypto.randomUUID()}`);
-        commit({ ...current.current, clips: [...current.current.clips, { id, rowId: row.id, kind: "clip", label: track.type === "animation" ? "Animation" : "Event", color: trackTypes[track.type].color, range: { start: time, end: time + (track.type === "animation" ? 12 : 1) } }] });
+        commit({ ...current.current, clips: [...current.current.clips, { id, rowId: row.id, kind: "clip", label: track.type === "animation" ? "Animation" : "Event", sourceDuration: track.type === "animation" ? 12 : undefined, color: trackTypes[track.type].color, range: { start: time, end: time + (track.type === "animation" ? 12 : 1) } }] });
         setSelected(id);
       }
     };
+    if (track.type === "group") return <>
+      <button className="example-track-action" aria-label={`Mute ${row.label}`} aria-pressed={track.muted ?? false} title="Mute group" onClick={() => toggle("muted")}>M</button>
+      <TrackMenu label={`Add track to ${row.label}`} options={Object.entries(trackTypes).map(([value, info]) => ({ value, label: value === "group" ? "Group" : `${info.label} Track` }))} onAdd={value => addTrackOfType(value, row.id)} />
+    </>;
     return <>
       <button className="example-track-action" aria-label={`Mute ${row.label}`} aria-pressed={track.muted ?? false} title="Mute track" onClick={() => toggle("muted")}>M</button>
       <button className="example-track-action" aria-label={`Solo ${row.label}`} aria-pressed={track.solo ?? false} title="Solo track (same media type)" onClick={() => toggle("solo")}>S</button>
@@ -325,21 +398,22 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     if (target) { setError(""); void load(Array.from(event.target.files ?? []), target.rowId, target.time); }
     event.target.value = "";
   }} />;
-  const addTrack = <TrackMenu options={Object.entries(trackTypes).map(([value, info]) => ({ value, label: `${info.label} Track` }))} onAdd={value => {
-    const type = value as TrackType;
-    if (Object.prototype.hasOwnProperty.call(trackTypes, type)) commit({ ...current.current, tracks: [...current.current.tracks, { id: timelineId<"row">(`${type}-track-${crypto.randomUUID()}`), type }] });
-  }} />;
+  const addTrack = <TrackMenu options={Object.entries(trackTypes).map(([value, info]) => ({ value, label: value === "group" ? "Group" : `${info.label} Track` }))} onAdd={value => addTrackOfType(value)} />;
   const projectName = motion ? "Untitled" : "Stress Test";
   const saveStatus = !ready ? "Loading project" : storageError || (saving ? "Saving project" : "Project saved in this browser");
   const rowIcon = (row: TimelineRow) => {
     const track = document.tracks.find(track => track.id === row.id);
     return track ? <span title={`${trackTypes[track.type].label} Track`}><TrackIcon type={track.type} /></span> : null;
   };
+  const playbackRange = document.playbackRange ?? { start: 0, end: 12 };
+  const changePlaybackRange = (range: TimeRange) => { if (range.end > range.start) commit({ ...current.current, playbackRange: range }); };
   const toolbar = <>
     <span className="example-save-state" role="status" aria-label={`${projectName}: ${saveStatus}`} title={`${projectName} · ${saveStatus}`}>{projectName}{!ready || storageError || saving ? "*" : ""}</span>
     <button className="timeline-editor__button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.current.length} onClick={undo}>↶</button>
     <button className="timeline-editor__button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!future.current.length} onClick={redo}>↷</button>
+    <label className="example-range-field">In <TimeField label="Playback start" value={playbackRange.start} onCommit={start => changePlaybackRange({ ...playbackRange, start })} /></label>
+    <label className="example-range-field">Out <TimeField label="Playback end" value={playbackRange.end} onCommit={end => changePlaybackRange({ ...playbackRange, end })} /></label>
   </>;
   const renameRow = (id: RowId, label: string) => commit({ ...current.current, tracks: current.current.tracks.map(track => track.id === id ? { ...track, label } : track) });
-  return { document, ready, saving, toolbar, addTrack, rowIcon, rowActions, renameRow, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
+  return { document, collapsed, toggleRow, moveRow, ready, saving, toolbar, addTrack, rowIcon, rowActions, renameRow, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
 }

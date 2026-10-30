@@ -28,7 +28,7 @@ Dragging on the ruler or the track area scrubs **live**: every pointer sample di
 
 The track viewport has no zoom slider and no native horizontal scrollbar. A **view range bar** under the tracks (UE Sequencer style) shows the whole clip as the bar and the visible window as a thumb: drag the thumb to pan, drag either end to zoom that side, click the empty bar to centre the view there, double-click to fit the whole clip. The view fits the whole clip whenever the data source's range changes.
 
-Wheel over the ruler or the tracks: **wheel** zooms the time axis around the pointer (wheel down = zoom in), **Shift+wheel** (or a trackpad's horizontal delta) pans, **Ctrl+wheel** zooms the row height (`--timeline-row-zoom`, 0.6×–3×). Zoomed in far enough (≥ 6px per frame) the track grid switches to one line per frame and the ruler labels frames; `timelineGridSteps` in `core/viewRange.ts` decides the steps. The zoom math lives in `core/viewRange.ts` and is exported from `@yohawing/timeline-editor/core`.
+Wheel over the ruler or the tracks: **wheel** zooms the time axis around the pointer (wheel up = zoom in), **Shift+wheel** (or a trackpad's horizontal delta) pans, **Ctrl+wheel** zooms the row height (`--timeline-row-zoom`, 0.6×–3×). Zoomed in far enough (≥ 6px per frame) the track grid switches to one line per frame and the ruler labels frames; `timelineGridSteps` in `core/viewRange.ts` decides the steps. The zoom math lives in `core/viewRange.ts` and is exported from `@yohawing/timeline-editor/core`.
 
 ### Frame-rate picker
 
@@ -77,12 +77,13 @@ Clips display a bounded peak envelope generated from every decoded PCM channel.
 Drag a clip to change its start or move it to another Audio Track. Position changes
 preserve its duration and PCM alignment. Dragging previews the edit; release commits
 one undo step. **Esc** cancels. Frame snapping is enabled initially; **Alt-drag**
-bypasses it, and **Snap** toggles it. Clips may extend beyond the fixed 12-second
-demo playback range; the viewport shows only their visible portion.
+bypasses it, and **Snap** toggles it. Clips may extend beyond the independently
+editable playback range; the view includes the clips and configured range.
 
 The demo holds up to 50 undo steps, including file addition, movement, deletion and
 track creation. Audio resources are retained while reachable from current/undo/redo
-states, then released. There is no persistence, trimming, multi-selection or export.
+states, then released. Project persistence and trimming are supported;
+multi-selection and project export are not implemented.
 
 Shortcuts apply in the Timeline viewport and track area. Native inputs and
 toolbar buttons retain their own keyboard behavior:
@@ -187,3 +188,23 @@ read or audio decode disables saving for that session to avoid replacing unreada
 
 `slots.rowIcon(row)` supplies an optional track-type icon before each label.
 The demo provides Audio, Animation (including Root Motion), and Event icons.
+
+Clip edge dragging calls optional `editing.onResizeClip(id, range)`; numeric Start
+and End fields are also available in the demo inspector. Left trimming advances
+`sourceOffset` without moving the media content. `sourceDuration` describes the
+full asset and `loop` repeats that source until the clip end. Waveforms use the
+same source mapping; moving the clip preserves its offset. Turning Loop off
+limits the section to the remaining source. Clip looping is independent of the
+transport Loop button. Both trim and inspector edits support undo and persistence.
+
+The demo In/Out fields edit an independent playback range in seconds. The local
+controller accepts `setPlaybackRange`; other host controllers may handle this
+optional command when exposing their own range UI. Timeline view bounds include
+clips and the playback range, while playback stops/loops at the configured bounds.
+
+Add a Group from the Tracks menu. Drag a track label onto a Group to parent it,
+or onto the Tracks heading to ungroup it. Groups support nesting, naming, Mute,
+and adding child tracks through +. Their disclosure buttons collapse/expand the
+rows without stopping playback. Membership is project data; collapsed group IDs
+are UI preferences in LocalStorage. Hosts opt in with `onMoveRow` and
+`onToggleRow` and provide the visible flattened rows/depth/expanded state.

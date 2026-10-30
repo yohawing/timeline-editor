@@ -54,9 +54,9 @@ describe("zoomAroundAnchor", () => {
     expect(next.scrollLeft).toBe(0);
   });
 
-  it("wheel: positive deltaY (wheel down) zooms in, negative zooms out, lines scale up", () => {
-    expect(wheelZoomFactor(100)).toBeGreaterThan(1);
-    expect(wheelZoomFactor(-100)).toBeLessThan(1);
+  it("wheel: negative deltaY (wheel up) zooms in, positive zooms out, lines scale up", () => {
+    expect(wheelZoomFactor(-100)).toBeGreaterThan(1);
+    expect(wheelZoomFactor(100)).toBeLessThan(1);
     expect(wheelZoomFactor(3, 1)).toBeCloseTo(wheelZoomFactor(48), 9);
     expect(wheelZoomFactor(Number.NaN)).toBe(1);
   });

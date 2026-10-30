@@ -13,7 +13,7 @@ for (const width of [320,1000]) test(`negative range transport and view ${width}
   await expect(readout).toContainText("-0060");
   const ruler=await page.locator(".timeline-editor__ruler").boundingBox();
   await page.mouse.move(ruler!.x+ruler!.width/2,ruler!.y+4);
-  await page.mouse.wheel(0,500);
+  await page.mouse.wheel(0,-500);
   await expect.poll(() => page.locator(".timeline-editor__range-thumb").evaluate(el => el.getBoundingClientRect().width)).toBeLessThan(ruler!.width);
   await readout.click();
   await expect(readout).toContainText("-2.00 / 3.00 s");

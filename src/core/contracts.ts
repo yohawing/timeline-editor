@@ -73,7 +73,12 @@ export interface TimelineClip extends TimelineItemBase {
   id: ClipId;
   range: TimeRange;
   color: string;
-  /** Normalized absolute PCM peaks, evenly spaced across the whole clip. */
+  /** Media time at the left edge; moving a clip preserves this offset. */
+  sourceOffset?: number;
+  /** Full source length in seconds (also the cycle length when looping). */
+  sourceDuration?: number;
+  loop?: boolean;
+  /** Normalized absolute PCM peaks, evenly spaced across the full source. */
   waveform?: readonly number[];
 }
 

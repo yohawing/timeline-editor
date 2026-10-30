@@ -41,6 +41,7 @@ export type TimelinePlaybackCommand =
   | ({ type: "seek"; time: number } & TargetedPlaybackCommand)
   | ({ type: "setLooping"; looping: boolean } & TargetedPlaybackCommand)
   | ({ type: "setRate"; rate: number } & TargetedPlaybackCommand)
+  | ({ type: "setPlaybackRange"; range: TimeRange } & TargetedPlaybackCommand)
   | ({ type: "setLoopRange"; range: TimeRange | null } & TargetedPlaybackCommand);
 
 export interface TimelinePlaybackController {
@@ -91,8 +92,8 @@ export function projectTimelinePlaybackTime(
 }
 
 export function createLocalPlaybackController(durationOrRange: number | TimeRange, initialTime?: number): TimelinePlaybackController {
-  const range = typeof durationOrRange === "number" ? { start: 0, end: durationOrRange } : durationOrRange;
-  const duration = range.end - range.start;
+  let range = typeof durationOrRange === "number" ? { start: 0, end: durationOrRange } : durationOrRange;
+  let duration = range.end - range.start;
   if (!Number.isFinite(range.start) || !Number.isFinite(range.end) || !Number.isFinite(duration) || duration < 0) throw new RangeError("Playback duration must be finite and non-negative");
   let snapshot: TimelinePlaybackSnapshot = {
     available: true,
@@ -170,6 +171,14 @@ export function createLocalPlaybackController(durationOrRange: number | TimeRang
           snapshot = { ...snapshot, target: command.target, loopRange: clampTimelineLoopRange(command.range, range) };
           notify();
           break;
+        case "setPlaybackRange": {
+          const next = command.range;
+          if (!Number.isFinite(next.start) || !Number.isFinite(next.end) || !Number.isFinite(next.end - next.start) || next.end <= next.start) throw new RangeError("Invalid playback range");
+          range = { ...next }; duration = range.end - range.start;
+          snapshot = { ...snapshot, target: command.target, range, duration, time: clampTimelineTime(snapshot.time, range), loopRange: clampTimelineLoopRange(snapshot.loopRange, range) };
+          notify();
+          break;
+        }
         case "setRate": {
           const rate = Number.isFinite(command.rate) && command.rate > 0 ? command.rate : 1;
           snapshot = { ...snapshot, target: command.target, rate };

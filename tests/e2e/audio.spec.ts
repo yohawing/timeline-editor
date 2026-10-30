@@ -10,7 +10,8 @@ async function drop(page: Page, time: number, row = 0, name = "dropped.wav", inv
     const content = document.querySelector<HTMLElement>(".timeline-editor__content")!;
     const bounds = viewport.getBoundingClientRect();
     const rowElement = document.querySelector<HTMLElement>(".timeline-editor__row")!;
-    const clientX = bounds.left + time / 12 * content.getBoundingClientRect().width - viewport.scrollLeft;
+    const view = document.querySelector<HTMLElement>(".timeline-editor")!;
+    const clientX = bounds.left + (time - Number(view.dataset.viewStart)) / (Number(view.dataset.viewEnd) - Number(view.dataset.viewStart)) * content.getBoundingClientRect().width - viewport.scrollLeft;
     const clientY = bounds.top + (row + 0.5) * rowElement.getBoundingClientRect().height - viewport.scrollTop;
     viewport.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: transfer, clientX, clientY }));
     if (!previewOnly) viewport.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer, clientX, clientY }));
@@ -35,7 +36,7 @@ test("two panes: drop at cursor, waveform, drag, cancel, delete, undo and redo",
   const contentWidth = await page.locator(".timeline-editor__content").evaluate(el => el.getBoundingClientRect().width);
   const bounds = (await clip.boundingBox())!;
   await page.mouse.move(bounds.x + 30, bounds.y + 20); await page.mouse.down();
-  await page.mouse.move(bounds.x + 30 + contentWidth / 12, bounds.y + 20, { steps: 5 }); await page.mouse.up();
+  await page.mouse.move(bounds.x + 30 + contentWidth / Number(await page.locator(".timeline-editor").getAttribute("data-view-end")), bounds.y + 20, { steps: 5 }); await page.mouse.up();
   await expect(clip).toHaveAttribute("data-start", "3");
   await viewport.press("Control+ArrowRight");
   await expect.poll(async () => Number(await clip.getAttribute("data-start"))).toBeCloseTo(3 + 1 / 24, 5);
@@ -62,7 +63,7 @@ test("drop preview and placement use zoomed and scrolled track coordinates", asy
   await page.goto("/");
   await addTrack(page, "audio");
   const ruler = (await page.locator(".timeline-editor__ruler").boundingBox())!;
-  await page.mouse.move(ruler.x + ruler.width / 2, ruler.y + 3); await page.mouse.wheel(0, 500);
+  await page.mouse.move(ruler.x + ruler.width / 2, ruler.y + 3); await page.mouse.wheel(0, -500);
   await expect.poll(() => page.locator(".timeline-editor__content").evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThan(ruler.width * 1.5);
   await page.locator(".timeline-editor__viewport").evaluate(el => {
     el.scrollLeft = document.querySelector(".timeline-editor__content")!.getBoundingClientRect().width / 4;
@@ -110,7 +111,7 @@ test("motion clips select, move, change Animation tracks and drive preview timin
   await page.mouse.move(box.x + 25 + width / 12 * 2, box.y + 20, { steps: 5 }); await page.mouse.up();
   await expect(clip).toHaveAttribute("data-start", "2");
   const ruler = (await page.locator(".timeline-editor__ruler").boundingBox())!;
-  await page.mouse.click(ruler.x + width / 12 * 3, ruler.y + 3);
+  await page.mouse.click(ruler.x + (await page.locator(".timeline-editor__content").boundingBox())!.width / Number(await page.locator(".timeline-editor").getAttribute("data-view-end")) * 3, ruler.y + 3);
   await expect.poll(async () => Number(await page.getByLabel("Animation preview").getAttribute("data-motion-time"))).toBe(1);
   await addTrack(page, "animation");
   const destination = (await page.locator(".timeline-editor__row").filter({ hasText: "Animation 1" }).boundingBox())!;
@@ -236,7 +237,7 @@ test("track divider resizes and row plus adds clips at the playhead", async ({ p
   await expect(page.getByRole("button", { name: "Clip resized.wav" })).toHaveAttribute("data-start", "2");
   await divider.press("Home"); await expect.poll(width).toBe(initial);
   const ruler = (await page.locator(".timeline-editor__ruler").boundingBox())!;
-  await page.mouse.click(ruler.x + ruler.width / 4, ruler.y + 3);
+  await page.mouse.click(ruler.x + ruler.width * 3 / Number(await page.locator(".timeline-editor").getAttribute("data-view-end")), ruler.y + 3);
   await page.getByRole("button", { name: "Add clip to Root Motion", exact: true }).click();
   await expect(page.getByRole("button", { name: "Clip Animation", exact: true })).toHaveCount(2);
   await expect(page.getByRole("button", { name: "Clip Animation", exact: true }).last()).toHaveAttribute("data-start", "3");
@@ -315,7 +316,7 @@ test("project edits and original audio survive reload and still play", async ({ 
   await drop(page, 0, 0, "persisted.wav");
   const clip = page.getByRole("button", { name: "Clip persisted.wav", exact: true });
   await expect(clip.getByLabel("Audio waveform")).toBeVisible();
-  const waveform = await clip.locator("path").getAttribute("d");
+  let waveform = await clip.locator("path").getAttribute("d");
   await clip.dblclick({ position: { x: 40, y: 20 } });
   const volume = page.getByRole("slider", { name: "Volume" });
   await volume.fill("0.4");
@@ -335,6 +336,7 @@ test("project edits and original audio survive reload and still play", async ({ 
   await page.getByLabel("Disable", { exact: true }).check();
   await page.getByRole("button", { name: "Close properties" }).click();
   await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
+  waveform = await clip.locator("path").getAttribute("d");
   await page.reload();
   await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
   await expect(motion).toHaveAttribute("data-start", motionStart!);
@@ -427,4 +429,122 @@ test("a stale session cannot replace a saved project", async ({ page }) => {
   await page.reload();
   await expect(page.getByRole("status")).toHaveText("Untitled");
   await expect(page.getByRole("button", { name: "Add clip to Event 1" })).toBeVisible();
+});
+
+async function enterTime(page: Page, label: string, value: string) {
+  const field = page.getByRole("spinbutton", { name: label, exact: true });
+  await field.fill(value); await field.press("Enter");
+}
+
+test("trims source time, loops audio, and saves an independent playback range", async ({ page }) => {
+  await page.addInitScript(() => {
+    const start = AudioBufferSourceNode.prototype.start;
+    (window as any).started = [];
+    AudioBufferSourceNode.prototype.start = function (...args) { (window as any).started.push({ loop: this.loop, offset: args[1], duration: args[2] }); start.apply(this, args); };
+  });
+  await page.goto("/"); await drop(page, 0, 0, "trim.wav");
+  const clip = page.getByRole("button", { name: "Clip trim.wav", exact: true });
+  await expect(clip).toBeVisible();
+  const box = (await clip.boundingBox())!;
+  const scale = box.width / 12;
+  await page.mouse.move(box.x + box.width - 3, box.y + 20); await page.mouse.down();
+  await page.mouse.move(box.x + scale * 8, box.y + 20, { steps: 5 }); await page.mouse.up();
+  await expect(clip).toHaveAttribute("data-end", "8");
+  await page.mouse.move(box.x + 5, box.y + 20); await page.mouse.down();
+  await page.mouse.move(box.x + scale * 2, box.y + 20, { steps: 5 }); await page.mouse.up();
+  await expect(clip).toHaveAttribute("data-start", "2");
+  const viewport = page.getByRole("application", { name: "Timeline scrubber" });
+  await viewport.press("Control+z"); await expect(clip).toHaveAttribute("data-start", "0");
+  await viewport.press("Control+Shift+z"); await expect(clip).toHaveAttribute("data-start", "2");
+  await clip.dblclick({ position: { x: 40, y: 20 } });
+  await page.getByRole("checkbox", { name: "Loop", exact: true }).check();
+  await enterTime(page, "Clip end", "18");
+  await page.getByRole("button", { name: "Close properties" }).click();
+  await enterTime(page, "Playback end", "14"); await enterTime(page, "Playback start", "13");
+  await page.getByRole("button", { name: "Skip to start", exact: true }).click();
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).started.length)).toBeGreaterThan(0);
+  const voice = await page.evaluate(() => (window as any).started[0]);
+  expect(voice.loop).toBe(true); expect(voice.offset).toBeGreaterThanOrEqual(1); expect(voice.offset).toBeLessThan(1.2);
+  expect(voice.duration).toBeLessThanOrEqual(1);
+  await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+  await expect.poll(() => page.getByLabel("Animation preview").getAttribute("data-time")).toBe("14.000");
+  await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready"); await page.reload();
+  await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
+  await expect(page.getByRole("spinbutton", { name: "Playback start", exact: true })).toHaveValue("13");
+  await expect(page.getByRole("spinbutton", { name: "Playback end", exact: true })).toHaveValue("14");
+  await expect(clip).toHaveAttribute("data-start", "2"); await expect(clip).toHaveAttribute("data-end", "18");
+  await clip.dblclick({ position: { x: 40, y: 20 } });
+  await expect(page.getByRole("checkbox", { name: "Loop", exact: true })).toBeChecked();
+  await page.getByRole("checkbox", { name: "Loop", exact: true }).uncheck();
+  await expect(clip).toHaveAttribute("data-end", "12");
+});
+
+test("groups move and collapse tracks, preserve clips, and restore hierarchy", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as any).groupVoices = [];
+    const create = AudioContext.prototype.createBufferSource;
+    AudioContext.prototype.createBufferSource = function () {
+      const node = create.call(this), voice = { active: false };
+      (window as any).groupVoices.push(voice);
+      const start = node.start.bind(node), stop = node.stop.bind(node);
+      node.start = (...args) => { voice.active = true; start(...args); };
+      node.stop = (...args) => { voice.active = false; stop(...args); };
+      return node;
+    };
+  });
+  const activeVoices = () => page.evaluate(() => (window as any).groupVoices.filter((voice: any) => voice.active).length);
+  await page.goto("/"); await drop(page, 0, 0, "group.wav");
+  await page.getByRole("button", { name: "Add track", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Group", exact: true }).click();
+  const audio = page.locator(".timeline-editor__row-label").filter({ hasText: /^Audio 1$/ });
+  const group = page.locator(".timeline-editor__row-label").filter({ hasText: /^Group 1$/ });
+  await audio.dragTo(group);
+  await expect(audio).toHaveCSS("padding-left", /[1-9]/);
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await expect.poll(activeVoices).toBe(1);
+  await page.getByRole("button", { name: "Collapse Group 1" }).click();
+  await expect.poll(activeVoices).toBe(1);
+  await page.getByRole("button", { name: "Mute Group 1", exact: true }).click();
+  await expect.poll(activeVoices).toBe(0);
+  await page.getByRole("button", { name: "Mute Group 1", exact: true }).click();
+  await expect.poll(activeVoices).toBe(1);
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(audio).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Clip group.wav", exact: true })).toHaveCount(0);
+  await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready"); await page.reload();
+  await expect(page.getByRole("button", { name: "Expand Group 1" })).toBeVisible();
+  await expect(audio).toHaveCount(0);
+  await page.getByRole("button", { name: "Expand Group 1" }).click();
+  await expect(page.getByRole("button", { name: "Clip group.wav", exact: true })).toBeVisible();
+  await audio.dragTo(page.locator(".timeline-editor__tree-heading"));
+  await expect(audio).toHaveCSS("padding-left", "0px");
+  await page.getByRole("button", { name: "Collapse Group 1" }).click();
+  await expect(audio).toBeVisible();
+  await page.getByRole("button", { name: "Add track to Group 1", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Group", exact: true }).click();
+  const child = page.locator(".timeline-editor__row-label").filter({ hasText: /^Group 2$/ });
+  await expect(child).toBeVisible();
+  await group.dragTo(child); // Parent cannot be placed in its descendant.
+  await expect(group).toHaveCSS("padding-left", "0px");
+  await expect(child).toHaveCSS("padding-left", /[1-9]/);
+});
+
+test("native looped audio at 2x wraps the source and stops at the clip boundary", async ({ page }) => {
+  await page.goto("/");
+  const result = await page.evaluate(async () => {
+    const { clickTrack, createTimelineAudio } = await import(/* @vite-ignore */ "/src/audioDemo.tsx");
+    const context = new OfflineAudioContext(1, 60000, 24000);
+    const audio = createTimelineAudio({ state: "running", currentTime: 0, destination: context.destination,
+      decodeAudioData: context.decodeAudioData.bind(context), createBufferSource: context.createBufferSource.bind(context), createGain: context.createGain.bind(context) });
+    await audio.load(clickTrack());
+    audio.sync({ available: true, time: 0, duration: 10, playing: true, looping: false, rate: 2 }, false, { start: 0, end: 4, sourceOffset: 11.5, loop: true });
+    const data = (await context.startRendering()).getChannelData(0);
+    const energy = (a: number, b: number) => data.slice(a, b).reduce((sum, value) => sum + Math.abs(value), 0);
+    return { before: energy(0, 5800), firstWrap: energy(6000, 6400), lastClick: energy(42000, 42400), afterEnd: energy(48000, 60000) };
+  });
+  expect(result.before).toBeLessThan(0.1);
+  expect(result.firstWrap).toBeGreaterThan(1);
+  expect(result.lastClick).toBeGreaterThan(1);
+  expect(result.afterEnd).toBeLessThan(0.1);
 });

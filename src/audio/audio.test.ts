@@ -105,3 +105,19 @@ describe("audio follows the host clock", () => {
     context.state = "suspended"; audio.sync(sample(0)); expect(nodes[0].disconnect).toHaveBeenCalled();
   });
 });
+
+it("loops a trimmed source without restarting on each source wrap", async () => {
+  const { audio, nodes, context } = fixture(); await audio.load(new ArrayBuffer(0));
+  const placement = { start: 5, end: 60, sourceOffset: 3, loop: true };
+  audio.sync(sample(24, { duration: 60 }), false, placement);
+  expect(nodes[0]).toMatchObject({ loop: true });
+  expect(nodes[0].start).toHaveBeenCalledWith(0, 2, 36);
+  context.currentTime = 20;
+  audio.sync(sample(44, { duration: 60 }), false, placement);
+  expect(nodes).toHaveLength(1);
+  audio.sync(sample(44, { duration: 60 }), false, { ...placement, sourceOffset: 4 });
+  expect(nodes).toHaveLength(2);
+  expect(nodes[1].start).toHaveBeenCalledWith(20, 3, 16);
+  audio.sync(sample(60, { duration: 60 }), false, placement);
+  expect(nodes[1].stop).toHaveBeenCalled();
+});

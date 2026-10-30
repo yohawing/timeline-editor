@@ -45,3 +45,7 @@ body { background: #101216; color: #d6d6dc; font: 13px Inter, "Segoe UI", sans-s
 .example-pane-divider:hover, .example-pane-divider:focus-visible { background: #6c91bc66; outline: none; }
 
 .example-save-state { font-size: 9px; color: #8995a8; padding: 0 4px; white-space: nowrap; }
+
+.example-range-field { display: inline-flex; align-items: center; gap: 3px; font-size: 9px; }
+.example-range-field input, .example-properties input[type=number] { width: 55px; border: 1px solid #414957; background: #17191f; color: #ccd4e0; font: inherit; padding: 2px; }
+.example-properties input[type=number] { width: 90px; }

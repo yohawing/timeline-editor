@@ -385,3 +385,14 @@
 .timeline-editor__row-name-input { min-width: 0; width: 100%; flex: 1; color: var(--timeline-text); background: var(--timeline-surface-0); border: 1px solid var(--timeline-accent); padding: 2px 3px; font: inherit; font-size: var(--timeline-track-font-size, 0.75rem); font-weight: 600; }
 
 .timeline-editor__row-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; margin-right: 4px; color: var(--timeline-text-muted); }
+
+.timeline-editor__trim { position: absolute; top: 0; bottom: 0; width: 6px; z-index: 3; cursor: ew-resize; }
+.timeline-editor__trim:hover { background: #ffffff66; }
+.timeline-editor__trim--start { left: 0; }
+.timeline-editor__trim--end { right: 0; }
+
+.timeline-editor__playback-boundary { position: absolute; top: 0; width: 1px; border-left: 1px solid #e47979; pointer-events: none; }
+.timeline-editor__playback-boundary--start { border-color: #66c6a1; }
+
+button.timeline-editor__row-disclosure { background: none; border: 0; padding: 0; cursor: pointer; }
+.timeline-editor__row.is-drop-target { outline: 1px solid var(--timeline-accent); outline-offset: -1px; }

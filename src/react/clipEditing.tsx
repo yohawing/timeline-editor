@@ -11,6 +11,7 @@ export interface TimelineEditing {
   onSelectClip(id: ClipId | null): void;
   /** Request a host-owned inspector; no panel or state is imposed by the editor. */
   onOpenClipProperties?(id: ClipId): void;
+  onResizeClip?(id: ClipId, range: TimeRange): void;
   onMoveClip(id: ClipId, rowId: RowId, start: number): void;
   onDropFiles(files: readonly File[], rowId: RowId, time: number): void;
   onDelete(): void;
@@ -23,15 +24,15 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
   viewport: RefObject<HTMLDivElement | null>; scale: number; rowHeight: number;
   range: TimeRange; fps: number; snap: boolean; scrollLeft: number; width: number;
 }) {
-  const [preview, setPreview] = useState<{ rowId: RowId; start: number; label: string } | null>(null);
-  const drag = useRef<{ id: ClipId; rowId: RowId; start: number; offset: number; pointer: number; element: HTMLElement } | null>(null);
+  const [preview, setPreview] = useState<{ rowId: RowId; start: number; end?: number; label: string } | null>(null);
+  const drag = useRef<{ id: ClipId; rowId: RowId; start: number; offset: number; mode: "move" | "start" | "end"; pointer: number; element: HTMLElement } | null>(null);
   const previewRef = useRef(preview);
   const set = (value: typeof preview) => { previewRef.current = value; setPreview(value); };
   const latestStart = Math.max(range.start, range.end - 1 / fps);
-  const timeAt = (clientX: number, bypass = false) => {
+  const timeAt = (clientX: number, bypass = false, limit = latestStart) => {
     const element = viewport.current;
     const raw = range.start + (clientX - (element?.getBoundingClientRect().left ?? 0) + (element?.scrollLeft ?? 0)) / scale;
-    return Math.min(latestStart, Math.max(range.start, snap && !bypass ? Math.round(raw * fps) / fps : raw));
+    return Math.min(limit, Math.max(range.start, snap && !bypass ? Math.round(raw * fps) / fps : raw));
   };
   const rowAt = (clientY: number) => {
     const element = viewport.current;
@@ -83,7 +84,9 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
     if (!editing?.canEditClip(clip)) return null;
     const moving = drag.current?.id === clip.id ? preview : null;
     const start = moving?.start ?? clip.range.start;
-    const duration = clip.range.end - clip.range.start;
+    const duration = moving?.end !== undefined ? moving.end - start : clip.range.end - clip.range.start;
+    const sourceDuration = clip.sourceDuration ?? (clip.range.end - clip.range.start);
+    const sourceOffset = (clip.sourceOffset ?? 0) + (moving && drag.current?.mode === "start" ? start - clip.range.start : 0);
     const rows = moving ? dataSource.getRows({ start: 0, count: dataSource.getRowCount() }) : [];
     const index = moving ? rows.findIndex(row => row.id === moving.rowId) : rowIndex;
     const x = (start - range.start) * scale;
@@ -92,19 +95,22 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
     const visibleWidth = Math.max(1, right - left);
     const peaks = clip.waveform;
     const path: string[] = [];
-    if (peaks?.length && duration > 0) {
+    if (peaks?.length && sourceDuration > 0) {
       // Aggregate all bins represented by a pixel, so narrow transients survive zoom-out.
       for (let px = 0; px < visibleWidth; px += 2) {
-        const a = Math.max(0, Math.floor((left + px - x) / (duration * scale) * peaks.length));
-        const b = Math.min(peaks.length, Math.max(a + 1, Math.ceil((left + px + 2 - x) / (duration * scale) * peaks.length)));
+        const a = Math.floor((sourceOffset + (left + px - x) / scale) / sourceDuration * peaks.length);
+        const b = Math.max(a + 1, Math.ceil((sourceOffset + (left + px + 2 - x) / scale) / sourceDuration * peaks.length));
         let peak = 0;
-        for (let bin = a; bin < b; bin++) peak = Math.max(peak, peaks[bin]);
+        for (let bin = a; bin < Math.min(b, a + peaks.length); bin++) {
+          const index = clip.loop ? ((bin % peaks.length) + peaks.length) % peaks.length : bin;
+          if (index >= 0 && index < peaks.length) peak = Math.max(peak, peaks[index]);
+        }
         const height = Math.max(0.5, peak * 14);
         path.push(`M${px},${24 - height}v${height * 2}`);
       }
     }
     return <div key={clip.id} role="button" tabIndex={0} aria-label={`Clip ${clip.label}`} aria-pressed={editing.selectedClipId === clip.id}
-      data-clip-id={clip.id} data-start={start} data-row-id={moving?.rowId ?? clip.rowId}
+      data-clip-id={clip.id} data-start={start} data-end={start + duration} data-row-id={moving?.rowId ?? clip.rowId}
       className={`timeline-editor__editable-clip${editing.selectedClipId === clip.id ? " is-selected" : ""}`}
       title={`${clip.label} · ${start.toFixed(2)} s — ${(start + duration).toFixed(2)} s`}
       style={{ left, top: index * rowHeight + 2, width: visibleWidth, height: rowHeight - 4, backgroundColor: clip.color }}
@@ -113,12 +119,23 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
       onPointerDown={(event) => {
         if (event.button !== 0) return;
         event.preventDefault(); event.stopPropagation(); viewport.current?.focus(); editing.onSelectClip(clip.id);
-        drag.current = { id: clip.id, rowId: clip.rowId, start: clip.range.start, offset: timeAt(event.clientX, true) - clip.range.start, pointer: event.pointerId, element: event.currentTarget };
+        const edge = (event.target as HTMLElement).closest<HTMLElement>("[data-trim-edge]")?.dataset.trimEdge;
+        const mode = editing.onResizeClip && (edge === "start" || edge === "end") ? edge : "move";
+        drag.current = { mode, id: clip.id, rowId: clip.rowId, start: clip.range.start, offset: timeAt(event.clientX, true) - clip.range.start, pointer: event.pointerId, element: event.currentTarget };
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onPointerMove={(event) => {
         const current = drag.current; if (!current || current.pointer !== event.pointerId) return;
         event.stopPropagation();
+        if (current.mode !== "move") {
+          const edge = timeAt(event.clientX, event.altKey, range.end);
+          const minStart = Math.max(range.start, clip.range.start - (clip.sourceOffset ?? 0));
+          const maxEnd = clip.sourceDuration !== undefined && !clip.loop ? clip.range.start + clip.sourceDuration - (clip.sourceOffset ?? 0) : range.end;
+          const start = current.mode === "start" ? Math.max(minStart, Math.min(clip.range.end - 1 / fps, edge)) : clip.range.start;
+          const end = current.mode === "end" ? Math.max(start + 1 / fps, Math.min(maxEnd, edge)) : clip.range.end;
+          set({ rowId: clip.rowId, start, end, label: `${start.toFixed(2)} — ${end.toFixed(2)} s` });
+          return;
+        }
         const raw = timeAt(event.clientX, true) - current.offset;
         const next = Math.max(range.start, Math.min(latestStart, snap && !event.altKey ? Math.round(raw * fps) / fps : raw));
         const row = rowAt(event.clientY);
@@ -127,10 +144,15 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
       onPointerUp={(event) => {
         if (drag.current?.pointer !== event.pointerId) return;
         event.stopPropagation(); const next = previewRef.current;
-        if (next) editing.onMoveClip(clip.id, next.rowId, next.start);
+        if (next) {
+          if (next.end !== undefined) editing.onResizeClip?.(clip.id, { start: next.start, end: next.end });
+          else editing.onMoveClip(clip.id, next.rowId, next.start);
+        }
         cancel();
       }} onPointerCancel={cancel} onLostPointerCapture={() => { if (drag.current) cancel(); }}>
-      <span>{clip.label}</span>
+      <span>{clip.label}{clip.loop ? " ↻" : ""}</span>
+      {editing.onResizeClip && left === x && <i className="timeline-editor__trim timeline-editor__trim--start" data-trim-edge="start" title="Trim clip start" />}
+      {editing.onResizeClip && right === x + duration * scale && <i className="timeline-editor__trim timeline-editor__trim--end" data-trim-edge="end" title="Trim clip end" />}
       {peaks && <svg className="timeline-editor__waveform" aria-label="Audio waveform" viewBox={`0 0 ${visibleWidth} 40`} preserveAspectRatio="none"><path d={path.join("")} /></svg>}
     </div>;
   };

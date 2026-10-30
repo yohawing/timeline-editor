@@ -1,12 +1,12 @@
 import { useId, useRef, useState } from "react";
 
-export function TrackMenu({ options, onAdd }: { options: readonly { value: string; label: string }[]; onAdd(value: string): void }) {
+export function TrackMenu({ options, onAdd, label = "Add track" }: { label?: string; options: readonly { value: string; label: string }[]; onAdd(value: string): void }) {
   const id = useId();
   const menu = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const [position, setPosition] = useState({ left: 0, top: 0 });
   return <>
-    <button ref={trigger} className="example-add-track" aria-label="Add track" title="Add track" popoverTarget={id} aria-haspopup="menu"
+    <button ref={trigger} className="example-add-track" aria-label={label} title={label} popoverTarget={id} aria-haspopup="menu"
       onClick={() => { const box = trigger.current!.getBoundingClientRect(); setPosition({ left: Math.max(4, box.right - 160), top: box.bottom + 3 }); }}>
       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
     </button>

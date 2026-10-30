@@ -78,21 +78,20 @@ export function zoomAroundAnchor(
 
 /**
  * Wheel delta -> zoom factor. `deltaMode` follows `WheelEvent.deltaMode`
- * (0 pixels, 1 lines, 2 pages). Wheel DOWN (positive deltaY) zooms IN, wheel
- * up zooms out — the direction UE's Sequencer and most NLE users expect
- * (2026-09-03 FB: the opposite mapping read as inverted). One typical mouse
+ * (0 pixels, 1 lines, 2 pages). Wheel UP (negative deltaY) zooms IN, wheel
+ * down zooms OUT. One typical mouse
  * notch (~100px) gives about ×1.16; trackpad deltas integrate smoothly.
  */
 export function wheelZoomFactor(deltaY: number, deltaMode = 0): number {
   const pixels = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * 400 : deltaY;
-  return Math.exp(finite(pixels, 0) * 0.0015);
+  return Math.exp(-finite(pixels, 0) * 0.0015);
 }
 
 /** Wheel delta -> row-height zoom factor (Ctrl+wheel). Same direction as the
- * time axis (down = taller rows); coarser so a notch is a visible step. */
+ * time axis (up = taller rows); coarser so a notch is a visible step. */
 export function wheelRowZoomFactor(deltaY: number, deltaMode = 0): number {
   const pixels = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * 400 : deltaY;
-  return Math.exp(finite(pixels, 0) * 0.002);
+  return Math.exp(-finite(pixels, 0) * 0.002);
 }
 
 /**
