@@ -416,3 +416,16 @@ it("group disclosure does not submit its host form", () => {
   expect(toggle).toHaveBeenCalledWith(rowId);
   expect(submit).not.toHaveBeenCalled();
 });
+
+it("leaves custom inspector keyboard controls to the host", () => {
+  const transport = controller();
+  const onDelete = vi.fn(), onKeyDown = vi.fn();
+  render(<TimelineEditor dataSource={source()} playbackController={transport}
+    editing={{ selectedClipId: null, canEditClip: () => true, canDropFiles: () => true, onSelectClip: vi.fn(), onMoveClip: vi.fn(), onDropFiles: vi.fn(), onDelete, onUndo: vi.fn(), onRedo: vi.fn() }}
+    slots={{ inspector: <div role="slider" tabIndex={0} aria-label="Host slider" onKeyDown={onKeyDown} /> }} />);
+  const slider = screen.getByRole("slider", { name: "Host slider" });
+  for (const key of [" ", "ArrowRight", "Delete"]) fireEvent.keyDown(slider, { key });
+  expect(onKeyDown).toHaveBeenCalledTimes(3);
+  expect(transport.dispatch).not.toHaveBeenCalled();
+  expect(onDelete).not.toHaveBeenCalled();
+});

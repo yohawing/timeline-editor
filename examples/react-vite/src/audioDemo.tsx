@@ -336,24 +336,26 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     if (cancelled) publish(before);
     else { past.current = [...past.current, before].slice(-50); future.current = []; setDocument({ ...current.current }); }
   };
-  const properties = inspected && <aside className="example-properties" aria-label="Clip properties">
-    <header><strong>Properties</strong><button aria-label="Close properties" title="Close" onClick={() => setInspectorId(null)}>×</button></header>
-    <div className="example-property-name" title={inspected.label}>{inspected.label}</div>
+  const properties = inspected && <aside className="timeline-editor__properties" aria-label="Clip properties">
+    <header className="timeline-editor__properties-header"><strong>Properties</strong><button type="button" className="timeline-editor__button" aria-label="Close properties" title="Close" onClick={() => setInspectorId(null)}>×</button></header>
+    <div className="timeline-editor__properties-content">
+    <div className="timeline-editor__property-name" title={inspected.label}>{inspected.label}</div>
     <dl><dt>Start</dt><dd><TimeField {...timeDisplay} label="Clip start" value={inspected.range.start} onCommit={start => resizeClip(inspected.id, { ...inspected.range, start })} /></dd>
       <dt>End</dt><dd><TimeField {...timeDisplay} label="Clip end" value={inspected.range.end} onCommit={end => resizeClip(inspected.id, { ...inspected.range, end })} /></dd>
       <dt>Duration</dt><dd>{formatTime(inspected.range.end - inspected.range.start)}</dd>
       <dt>Source offset</dt><dd>{formatTime(inspected.sourceOffset ?? 0)}</dd></dl>
-    <div className="example-property-toggles">
+    <div className="timeline-editor__property-toggles">
       {typeOf(inspected) !== "event" && <label><input type="checkbox" checked={inspected.loop ?? false} onChange={event => updateProperties(inspected.id, { loop: event.target.checked })} />Loop</label>}
       <label><input type="checkbox" checked={inspected.disabled ?? false} onChange={event => updateProperties(inspected.id, { disabled: event.target.checked })} />Disable</label>
     </div>
-    {typeOf(inspected) === "audio" && <label className="example-property-volume">Volume <output>{Math.round((inspected.volume ?? 1) * 100)}%</output>
+    {typeOf(inspected) === "audio" && <label className="timeline-editor__property-volume">Volume <output>{Math.round((inspected.volume ?? 1) * 100)}%</output>
       <input aria-label="Volume" type="range" min="0" max="2" step="0.01" value={inspected.volume ?? 1}
         onPointerDown={event => { volumeStart.current = { id: inspected.id, volume: inspected.volume }; event.currentTarget.setPointerCapture(event.pointerId); }}
         onChange={event => updateProperties(inspected.id, { volume: Number(event.target.value) })}
         onPointerUp={() => finishVolume()} onPointerCancel={() => finishVolume(true)} onLostPointerCapture={() => finishVolume()}
         onBlur={() => finishVolume()} />
     </label>}
+    </div>
   </aside>;
   const addTrackOfType = (value: string, parentId?: RowId) => {
     if (parentId && collapsed.includes(parentId)) toggleRow(parentId);

@@ -148,7 +148,7 @@ precedence over solo. Clips have an independent Disable property.
 Audio volume is a linear 0–200% gain; a slider drag is one undo step and keyboard
 steps are individual edits. Gain changes do not restart the audio source.
 The optional `TimelineEditing.onOpenClipProperties(id)` callback requests a
-host-owned inspector. The core does not impose a panel, property schema or solo
+host-owned inspector. `slots.inspector` places it inside the editor; the core does not impose a property schema or solo
 policy. `createTimelineAudio().setVolume(value)` supplies only the gain primitive.
 
 The track/timeline separator supports pointer dragging, Left/Right (10px),
@@ -160,8 +160,8 @@ motion; Event adds an editable placeholder section (no event dispatch runtime).
 
 In the standalone demo, drag the Timeline top edge to resize the preview/Timeline
 panes. Up/Down changes the split by 10px, Home or double-click resets it, and
-Escape cancels a drag. The inspector stays independent; this is host layout,
-not an additional TimelineEditor API.
+Escape cancels a drag. The preview/Timeline split remains host layout; the
+inspector is contained in TimelineEditor and does not resize the preview.
 
 Track labels support optional `onRenameRow(rowId, label)` for double-click editing
 (Enter/blur commits, Escape cancels, blank labels are ignored). The host owns
@@ -224,3 +224,11 @@ wrap boundaries, including trimmed source offsets; boundaries closer than 6px ar
 omitted at distant zoom levels to avoid dense overlapping lines. Disabled clips
 are translucent but remain selectable and editable. Read-only Canvas clips use
 the same disabled appearance and source-wrap positions.
+
+The optional `slots.inspector` occupies the right side below the Timeline toolbar.
+Its width is controlled by `--timeline-inspector-width` (default 15.5rem). In narrow
+editors it overlays the track area while staying within the editor. The supplied
+`timeline-editor__properties*` classes use the same surface, text, divider, accent,
+and control-size tokens as the timeline; property content and mutations remain
+host-owned. Track label/icon/action centers and action columns are aligned in the
+demo, including Group rows with no Solo control.

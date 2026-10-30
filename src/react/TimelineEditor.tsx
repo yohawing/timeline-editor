@@ -94,6 +94,8 @@ export interface TimelinePerformanceSummary {
 }
 
 export interface TimelineEditorSlots {
+  /** Optional host-owned properties panel, laid out inside the editor. */
+  inspector?: ReactNode;
   tracksHeaderEnd?: ReactNode;
   /** Host-owned controls for each visible row. */
   rowActions?: (row: TimelineRow) => ReactNode;
@@ -773,7 +775,7 @@ export function TimelineEditor({
    */
   const onViewportKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
-    if (target.isContentEditable || target.closest("input, textarea, select, button") || event.defaultPrevented) return;
+    if (target.closest(".timeline-editor__inspector") || target.isContentEditable || target.closest("input, textarea, select, button") || event.defaultPrevented) return;
     if (clipEditing.onKeyDown(event)) return;
     if (duration <= 0 || event.altKey || event.metaKey) return;
     const key = event.key.toLowerCase();
@@ -1101,7 +1103,7 @@ export function TimelineEditor({
   const playbackReadout = variant === "compact"
     ? formatCompactTimelineReadout(time, playbackRange, displayMode, fps)
     : formatTimelineReadout(time, playbackRange, displayMode, fps);
-  const rootClassName = ["timeline-editor", `timeline-editor--${variant}`, scrubbing ? "is-scrubbing" : "", className ?? ""].filter(Boolean).join(" ");
+  const rootClassName = ["timeline-editor", `timeline-editor--${variant}`, scrubbing ? "is-scrubbing" : "", slots?.inspector ? "has-inspector" : "", className ?? ""].filter(Boolean).join(" ");
 
   type UntargetedPlaybackCommand =
     | { type: "play" }
@@ -1282,6 +1284,7 @@ export function TimelineEditor({
           </div>
         </div>
       </div>
+      {slots?.inspector && <div className="timeline-editor__inspector">{slots.inspector}</div>}
     </section>
   );
 }

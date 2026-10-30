@@ -73,7 +73,7 @@ function Example(): JSX.Element {
   useEffect(() => { if (audio.ready) document.querySelector<HTMLElement>(".timeline-editor__viewport")?.focus({ preventScroll: true }); }, [audio.ready]);
   const audioData = useMemo(() => withAudioRows(dataSource, audio.document, audio.collapsed), [dataSource, audio.document, audio.collapsed]);
   return (
-    <main data-project-state={!audio.ready ? "loading" : audio.saving ? "saving" : "ready"} ref={panes.shell} style={panes.style} className={`example-shell${audio.properties ? " has-properties" : ""}`}>
+    <main data-project-state={!audio.ready ? "loading" : audio.saving ? "saving" : "ready"} ref={panes.shell} style={panes.style} className="example-shell">
       {panes.divider}
       <div className="example-preview" onPointerDown={() => document.querySelector<HTMLElement>(".timeline-editor__viewport")?.focus()}>
         <canvas ref={audio.preview} aria-label="Animation preview" />
@@ -92,7 +92,7 @@ function Example(): JSX.Element {
           playbackController={audio.controller}
           frameRate={fps}
           variant={variant}
-          slots={{ toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack, rowActions: audio.rowActions, rowIcon: audio.rowIcon }}
+          slots={{ inspector: audio.properties, toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack, rowActions: audio.rowActions, rowIcon: audio.rowIcon }}
           onDiagnostic={(diagnostic) => console.warn(diagnostic.message, diagnostic.error)}
           onPerformanceSummary={(summary) => {
             const runtime = globalThis as { __timelinePerf?: unknown; __timelinePerfSamples?: unknown[] };
@@ -103,7 +103,6 @@ function Example(): JSX.Element {
         {audio.error && <div className="example-error" role="alert">{audio.error}<button title="Dismiss error" aria-label="Dismiss error" onClick={audio.dismissError}>×</button></div>}
       </div>
       {audio.filePicker}
-      {audio.properties}
     </main>
   );
 }
