@@ -42,7 +42,7 @@ test("two panes: drop at cursor, waveform, drag, cancel, delete, undo and redo",
   await viewport.press("Control+z"); await expect(clip).toHaveAttribute("data-start", "3");
   await viewport.press("Control+Shift+z"); await expect(clip).toHaveCount(0);
   await viewport.press("Control+z");
-  await page.getByRole("button", { name: "Add Audio Track" }).click();
+  await page.getByRole("combobox", { name: "Add track" }).selectOption("audio");
   await drop(page, 1, 1, "second.wav");
   await expect(page.getByRole("button", { name: "Audio clip second.wav", exact: true })).toHaveAttribute("data-start", "1");
   await drop(page, 4, 0, "broken.wav", true);
@@ -54,7 +54,7 @@ test("two panes: drop at cursor, waveform, drag, cancel, delete, undo and redo",
 
 test("drop preview and placement use zoomed and scrolled track coordinates", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Add Audio Track" }).click();
+  await page.getByRole("combobox", { name: "Add track" }).selectOption("audio");
   const ruler = (await page.locator(".timeline-editor__ruler").boundingBox())!;
   await page.mouse.move(ruler.x + ruler.width / 2, ruler.y + 3); await page.mouse.wheel(0, 500);
   await expect.poll(() => page.locator(".timeline-editor__content").evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThan(ruler.width * 1.5);

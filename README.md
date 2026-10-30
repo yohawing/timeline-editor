@@ -65,7 +65,8 @@ The verify command also runs Chromium interaction coverage. Install the browser 
 Run `npm run build` then `npm run dev`. The standalone demo has a Canvas
 animation preview above the Timeline. Drop audio onto **Audio 1** at the desired
 pointer time: the insertion line shows the target track and time before release.
-Use **+ Audio** for another track. Every successful drop adds clips; existing
+Use **＋** in the TRACKS heading, then choose **Audio Track**, for another track.
+The menu lists currently supported track creation types (Audio Track). Every successful drop adds clips; existing
 clips are retained on decode failure. Multiple/overlapping clips mix during playback.
 File formats depend on the browser decoder, not the extension.
 

@@ -90,6 +90,7 @@ export interface TimelinePerformanceSummary {
 }
 
 export interface TimelineEditorSlots {
+  tracksHeaderEnd?: ReactNode;
   toolbarStart?: ReactNode;
   toolbarEnd?: ReactNode;
   emptyState?: ReactNode;
@@ -1115,7 +1116,7 @@ export function TimelineEditor({
         </div>
       </header>
       <div className="timeline-editor__body">
-        <div className="timeline-editor__tree-heading">TRACKS</div>
+        <div className="timeline-editor__tree-heading"><span>TRACKS</span><div className="timeline-editor__slot">{slots?.tracksHeaderEnd}</div></div>
         <div className="timeline-editor__tree-viewport" ref={treeViewportRef} onScroll={onTreeScroll}>
           <div className="timeline-editor__tree-content" style={{ height: totalHeight }}>
             {rows.map((row, index) => {

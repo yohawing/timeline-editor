@@ -170,10 +170,15 @@ export function useAudioDemo(controller: TimelinePlaybackController) {
     },
     onUndo: undo, onRedo: redo,
   };
+  const addTrack = <select className="example-add-track" aria-label="Add track" title="Add track" value="" onChange={event => {
+    if (event.target.value === "audio") commit({ ...current.current, tracks: [...current.current.tracks, timelineId<"row">(`audio-track-${++serial.current}`)] });
+  }}>
+    <option value="" disabled hidden>＋</option>
+    <option value="audio">Audio Track</option>
+  </select>;
   const toolbar = <>
-    <button className="timeline-editor__button timeline-editor__button--text" title="Add Audio Track" aria-label="Add Audio Track" onClick={() => commit({ ...current.current, tracks: [...current.current.tracks, timelineId<"row">(`audio-track-${++serial.current}`)] })}>+ Audio</button>
     <button className="timeline-editor__button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.current.length} onClick={undo}>↶</button>
     <button className="timeline-editor__button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!future.current.length} onClick={redo}>↷</button>
   </>;
-  return { document, toolbar, editing, preview, controller: wrapped, error, dismissError: () => setError("") };
+  return { document, toolbar, addTrack, editing, preview, controller: wrapped, error, dismissError: () => setError("") };
 }
