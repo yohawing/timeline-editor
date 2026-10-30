@@ -147,6 +147,9 @@ export function createLocalPlaybackController(durationOrRange: number | TimeRang
     getSnapshot: () => snapshot,
     subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
     dispatch: (command) => {
+      // Settle elapsed time before changing state/rate or seeking.
+      snapshot = { ...snapshot, time: projectTimelinePlaybackTime(snapshot), sampledAtUnixMs: Date.now() };
+      lastTick = performance.now();
       switch (command.type) {
         case "play":
           if (!snapshot.playing) { snapshot = { ...snapshot, target: command.target, playing: true, sampledAtUnixMs: Date.now() }; startTimer(); notify(); }

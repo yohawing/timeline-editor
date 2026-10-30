@@ -7,6 +7,28 @@ import {
 } from "./playback";
 
 describe("transport-neutral playback controller", () => {
+  it("settles sub-tick time on pause/rate changes and resets elapsed time on seek", () => {
+    vi.useFakeTimers();
+    try {
+      const controller = createLocalPlaybackController(12);
+      const target = null;
+      controller.dispatch({ type: "play", target });
+      vi.advanceTimersByTime(50);
+      controller.dispatch({ type: "pause", target });
+      expect(controller.getSnapshot().time).toBeCloseTo(0.05);
+      controller.dispatch({ type: "play", target });
+      vi.advanceTimersByTime(50);
+      controller.dispatch({ type: "setRate", rate: 2, target });
+      expect(controller.getSnapshot().time).toBeCloseTo(0.1);
+      vi.advanceTimersByTime(50);
+      expect(controller.getSnapshot().time).toBeCloseTo(0.2);
+      vi.advanceTimersByTime(25);
+      controller.dispatch({ type: "seek", time: 5, target });
+      vi.advanceTimersByTime(75);
+      expect(controller.getSnapshot().time).toBeCloseTo(5.15);
+      controller.dispatch({ type: "pause", target });
+    } finally { vi.useRealTimers(); }
+  });
   it("supports play, pause, seek and loop without a native runtime", () => {
     const controller = createLocalPlaybackController(4, 1.02);
     const listener = vi.fn();

@@ -1,10 +1,18 @@
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; height: 100%; margin: 0; }
 body { background: #0d0e11; color: #d6d6dc; font: 13px Inter, "Segoe UI", sans-serif; }
-.example-shell { display: grid; grid-template-rows: 58px minmax(0, 1fr); width: 100%; height: 100%; padding: 18px; gap: 12px; }
+.example-shell { display: grid; grid-template-rows: 58px auto minmax(0, 1fr); width: 100%; height: 100%; padding: 18px; gap: 12px; }
 .example-heading { display: flex; align-items: center; justify-content: space-between; color: #858a9b; font-size: 11px; letter-spacing: .02em; }
 .example-heading div { display: flex; align-items: baseline; gap: 10px; }
 .example-heading strong { color: #f2f3fa; font-size: 16px; font-weight: 600; }
 .example-heading span { color: #74798a; }
 .example-editor { min-width: 0; min-height: 0; overflow: hidden; border: 1px solid #2a2c35; border-radius: 6px; box-shadow: 0 14px 40px rgba(0,0,0,.25); }
 .example-badge { padding: 3px 6px; border: 1px solid rgba(90,143,224,.35); border-radius: 3px; color: #b8d1ff; background: rgba(59,111,196,.16); font-size: 9px; }
+
+.audio-demo-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.audio-demo-controls button, .audio-file-button { color: #d6d6dc; background: #20242e; border: 1px solid #454c60; border-radius: 4px; padding: 7px 10px; cursor: pointer; }
+.audio-file-button input { width: 180px; margin-left: 8px; }
+.audio-name { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.audio-marker { min-width: 150px; padding: 8px; color: white; text-align: center; background: linear-gradient(to right, #407d71 var(--progress), #252a35 var(--progress)); border: 2px solid #454c60; font-variant-numeric: tabular-nums; }
+.audio-marker[data-flash="true"] { border-color: #a9ffe9; }
+.audio-demo-controls [role="alert"] { color: #ffb4a6; }

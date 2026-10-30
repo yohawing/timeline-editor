@@ -1,4 +1,4 @@
-import { StrictMode, useMemo } from "react";
+import { StrictMode, useMemo, type JSX } from "react";
 import { createRoot } from "react-dom/client";
 import { TimelineEditor } from "@yohawing/timeline-editor";
 import {
@@ -9,6 +9,7 @@ import {
 } from "@yohawing/timeline-editor/core";
 import "@yohawing/timeline-editor/styles.css";
 import "./example.css";
+import { useAudioDemo, withAudioRow } from "./audioDemo";
 
 function createMalformedPlaybackController(): TimelinePlaybackController {
   const snapshot = {
@@ -45,16 +46,19 @@ function Example(): JSX.Element {
       dispatch: () => Promise.reject(new Error("example transport rejected")),
     } satisfies TimelinePlaybackController;
   }, [malformed, reject]);
+  const audio = useAudioDemo(playbackController);
+  const audioData = useMemo(() => withAudioRow(dataSource, audio.asset), [dataSource, audio.asset]);
   return (
     <main className="example-shell">
       <header className="example-heading">
         <div><strong>Timeline Editor</strong><span>standalone projection example</span></div>
         <span>React + Canvas · no Tauri runtime</span>
       </header>
-      <div className="example-editor">
+      {audio.controls}
+      <div className="example-editor" onDragOver={(event) => event.preventDefault()} onDrop={audio.onDrop}>
         <TimelineEditor
-          dataSource={dataSource}
-          playbackController={playbackController}
+          dataSource={audioData}
+          playbackController={audio.controller}
           frameRate={Number.isFinite(fps) && fps > 0 ? fps : 24}
           variant={variant}
           slots={{ toolbarEnd: <span className="example-badge">local transport</span> }}
