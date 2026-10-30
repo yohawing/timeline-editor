@@ -64,6 +64,8 @@ import { PlaybackRangeHandles } from "./PlaybackRangeHandles";
 import { useMiddlePan } from "./useMiddlePan";
 import { RowLabel } from "./RowLabel";
 import { TrackDivider } from "./TrackDivider";
+import { EventCue, type TimelineEventEditing } from "./EventCue";
+export type { TimelineEventEditing } from "./EventCue";
 import { useClipEditing, type TimelineEditing } from "./clipEditing";
 export type { TimelineEditing } from "./clipEditing";
 import {
@@ -124,6 +126,7 @@ export interface TimelineEditorProps {
   onViewStateChange?: (state: TimelineViewState) => void;
   dataSource: TimelineDataSource;
   editing?: TimelineEditing;
+  eventEditing?: TimelineEventEditing;
   /** Request insertion beside a row; the host owns hierarchy, order and undo. */
   onReorderRow?: (rowId: TimelineRow["id"], targetRowId: TimelineRow["id"], position: "before" | "after") => void;
   onMoveRow?: (rowId: TimelineRow["id"], parentId: TimelineRow["id"] | null) => void;
@@ -326,6 +329,8 @@ function drawItem(
     return;
   }
 
+  context.save();
+  context.globalAlpha = item.disabled ? 0.4 : 1;
   const x = timeToX(item.time);
   context.fillStyle = item.color;
   if (item.kind === "marker") {
@@ -338,12 +343,10 @@ function drawItem(
     context.fill();
   } else if (item.kind === "event-cue") {
     context.beginPath();
-    context.moveTo(x, rowY + 5 * s);
-    context.lineTo(x + 6 * s, rowY + 9 * s);
-    context.lineTo(x + 6 * s, rowY + 17 * s);
-    context.lineTo(x, rowY + 21 * s);
-    context.lineTo(x - 6 * s, rowY + 17 * s);
-    context.lineTo(x - 6 * s, rowY + 9 * s);
+    context.moveTo(x, rowY + 13 * s - 4);
+    context.lineTo(x + 4, rowY + 13 * s);
+    context.lineTo(x, rowY + 13 * s + 4);
+    context.lineTo(x - 4, rowY + 13 * s);
     context.closePath();
     context.fill();
   } else {
@@ -354,7 +357,8 @@ function drawItem(
   context.fillStyle = "rgba(238,238,244,.78)";
   context.font = `500 ${9 * s}px Inter, Segoe UI, sans-serif`;
   context.textBaseline = "middle";
-  context.fillText(item.label, x + 9 * s, rowY + 13 * s);
+  if (item.kind !== "event-cue") context.fillText(item.label, x + 9 * s, rowY + 13 * s);
+  context.restore();
 }
 
 function drawKey(
@@ -429,6 +433,7 @@ function dispatchSafely(
 export function TimelineEditor({
   dataSource,
   editing,
+  eventEditing,
   onRenameRow,
   onChangePlaybackRange,
   onMoveRow,
@@ -783,6 +788,10 @@ export function TimelineEditor({
    */
   const onViewportKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
+    if (target.closest(".timeline-editor__event-cue") && (event.ctrlKey || event.metaKey) && ["z", "y"].includes(event.key.toLowerCase())) {
+      clipEditing.onKeyDown(event);
+      return;
+    }
     if (target.closest(".timeline-editor__inspector") || target.isContentEditable || target.closest("input, textarea, select, button") || event.defaultPrevented) return;
     if (clipEditing.onKeyDown(event)) return;
     if (duration <= 0 || event.altKey || event.metaKey) return;
@@ -1084,6 +1093,7 @@ export function TimelineEditor({
     for (const item of items) {
       const rowIndex = rowIndexById.get(item.rowId);
       if (item.kind === "clip" && editing?.canEditClip(item)) continue;
+      if (item.kind === "event-cue" && eventEditing?.canEdit(item)) continue;
       if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, item, rowIndex, transform.timeToX, rowHeight, visibleTimeRange);
     }
     if (columns.length > 0) {
@@ -1106,7 +1116,7 @@ export function TimelineEditor({
       keysPainted: columns.length > 0 ? columns.length : keys.length,
       devicePixelRatio: dpr,
     });
-  }, [editing, dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
+  }, [editing, eventEditing, dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
 
   // Tick labels use a monospace font. Measuring a fixed sample tracks host font
   // size changes without coupling label layout to whichever ticks were rendered.
@@ -1257,6 +1267,7 @@ export function TimelineEditor({
             <div className="timeline-editor__content" style={{ width: totalWidth, height: totalHeight }} />
             <canvas className="timeline-editor__canvas" ref={canvasRef} />
             {editableClips.map(clip => clip.kind === "clip" ? clipEditing.renderClip(clip, rowQuery.start + rows.findIndex(row => row.id === clip.rowId)) : null)}
+            {eventEditing && dataSource.getItems(visibleQuery).map(item => item.kind === "event-cue" && eventEditing.canEdit(item) ? <EventCue key={item.id} cue={item} editing={eventEditing} rowIndex={rowQuery.start + rows.findIndex(row => row.id === item.rowId)} rowHeight={rowHeight} scale={pixelsPerSecond} range={range} fps={fps} snap={snap} displayMode={displayMode} /> : null)}
             {clipEditing.indicator}
             {canTransport && [(playbackRangePreview ?? playbackRange).start, (playbackRangePreview ?? playbackRange).end].map((boundary, index) => <div key={index} className={`timeline-editor__playback-boundary timeline-editor__playback-boundary--${index === 0 ? "start" : "end"}`} title={index === 0 ? "Playback start" : "Playback end"} style={{ left: (boundary - range.start) * pixelsPerSecond, height: Math.max(totalHeight, viewport.height) }} />)}
             <div className="timeline-editor__range-action">{slots?.diagnosticAction}</div>

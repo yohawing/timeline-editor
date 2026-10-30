@@ -82,6 +82,7 @@ function Example(): JSX.Element {
         <TimelineEditor
           dataSource={audioData}
           editing={audio.editing}
+          eventEditing={audio.eventEditing}
           initialViewState={preferences.initial.timeline}
           onViewStateChange={onViewStateChange}
           onChangePlaybackRange={audio.changePlaybackRange}

@@ -241,3 +241,10 @@ and saves order through project undo/persistence. Child icons and titles indent
 16px per level; row controls remain aligned. Muted tracks and tracks excluded by
 Solo dim their clips using the same evaluation rules as audio/preview, without
 changing each clip's saved Disable flag.
+
+Event Tracks in the demo contain `TimelineEventCue` point triggers. Add with the
+track's +, drag to move the time, or double-click to edit Time/Disable. Left/Right
+steps a frame, Escape cancels a drag and Delete removes the selected trigger.
+The optional `eventEditing` callbacks leave event data and evaluation host-owned;
+the library does not dispatch application events during playback. Existing demo
+Event Clips migrate to triggers at their start times on load.

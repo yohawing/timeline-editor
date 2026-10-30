@@ -4,8 +4,8 @@ import { TrackIcon } from "./TrackIcon";
 import { TrackMenu } from "./TrackMenu";
 import { useEffect, useRef, useState } from "react";
 import { createTimelineAudio } from "@yohawing/timeline-editor/audio";
-import { projectTimelinePlaybackTime, timelineId, type TimeRange, type TimelineClip, type RowId, type TimelineRow, type TimelineDataSource, type TimelinePlaybackController } from "@yohawing/timeline-editor/core";
-import type { TimelineEditing } from "@yohawing/timeline-editor";
+import { projectTimelinePlaybackTime, timelineId, type TimeRange, type TimelineEventCue, type TimelineClip, type RowId, type TimelineRow, type TimelineDataSource, type TimelinePlaybackController } from "@yohawing/timeline-editor/core";
+import type { TimelineEditing, TimelineEventEditing } from "@yohawing/timeline-editor";
 export { createTimelineAudio };
 
 // A quiet 12-second WAV, with a click at each integer second.
@@ -36,7 +36,7 @@ const trackTypes = {
 type TrackType = keyof typeof trackTypes;
 interface Track { parentId?: RowId; id: RowId; type: TrackType; label?: string; external?: boolean; muted?: boolean; solo?: boolean }
 interface DemoClip extends TimelineClip { volume?: number }
-export interface Document { playbackRange?: TimeRange; tracks: readonly Track[]; clips: readonly DemoClip[] }
+export interface Document { events?: readonly TimelineEventCue[]; playbackRange?: TimeRange; tracks: readonly Track[]; clips: readonly DemoClip[] }
 const firstTrack: Track = { id: timelineId<"row">("audio-track-1"), type: "audio" };
 const isAudioTrack = (document: Document, id: RowId) => document.tracks.some(track => track.id === id && track.type === "audio");
 
@@ -71,12 +71,12 @@ export function withAudioRows(base: TimelineDataSource, document: Document, coll
   rows.push(...baseRows.filter(row => !document.tracks.some(track => track.id === row.id)));
   return {
     ...base,
-    getRange: () => ({ start: Math.min(base.getRange().start, document.playbackRange?.start ?? 0, ...document.clips.map(clip => clip.range.start)), end: Math.max(base.getRange().end, document.playbackRange?.end ?? 12, ...document.clips.map(clip => clip.range.end)) }),
+    getRange: () => ({ start: Math.min(base.getRange().start, document.playbackRange?.start ?? 0, ...(document.events ?? []).map(event => event.time), ...document.clips.map(clip => clip.range.start)), end: Math.max(base.getRange().end, document.playbackRange?.end ?? 12, ...(document.events ?? []).map(event => event.time + 1), ...document.clips.map(clip => clip.range.end)) }),
     getGroups: () => [...base.getGroups(), ...tracks.filter(row => row.kind === "group").map(row => ({ id: timelineId<"group">(row.id), label: row.label, color: row.color }))],
     getBindings: () => [...tracks.filter(row => row.bindingId).map(row => ({ id: row.bindingId!, label: row.label, targetKind: row.targetKind })), ...base.getBindings().filter(binding => !tracks.some(row => row.bindingId === binding.id))],
     getRowCount: () => rows.length,
     getRows: ({ start, count }) => rows.slice(start, start + count),
-    getItems: query => [...base.getItems(query).filter(item => item.id !== "preview-animation"), ...document.clips.filter(clip => query.rowIds.includes(clip.rowId) && clip.range.start < query.range.end && clip.range.end > query.range.start).map(clip => ({ ...clip, disabled: clip.disabled || !trackEnabled(document, clip.rowId) }))],
+    getItems: query => [...base.getItems(query).filter(item => item.id !== "preview-animation"), ...document.clips.filter(clip => query.rowIds.includes(clip.rowId) && clip.range.start < query.range.end && clip.range.end > query.range.start).map(clip => ({ ...clip, disabled: clip.disabled || !trackEnabled(document, clip.rowId) })), ...(document.events ?? []).filter(event => query.rowIds.includes(event.rowId) && event.time >= query.range.start && event.time < query.range.end).map(event => ({ ...event, disabled: event.disabled || !trackEnabled(document, event.rowId) }))],
   };
 }
 
@@ -96,6 +96,8 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
   const past = useRef<Document[]>([]);
   const future = useRef<Document[]>([]);
   const [selected, setSelected] = useState<TimelineClip["id"] | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<TimelineEventCue["id"] | null>(null);
+  const [eventInspectorId, setEventInspectorId] = useState<TimelineEventCue["id"] | null>(null);
   const [inspectorId, setInspectorId] = useState<TimelineClip["id"] | null>(null);
   const volumeStart = useRef<{ id: TimelineClip["id"]; volume?: number } | null>(null);
   const selectedRef = useRef(selected); selectedRef.current = selected;
@@ -209,7 +211,9 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
         canPersist.current = true;
         if (saved) {
           assets.current = new Map(saved.audio);
-          current.current = saved.document; setDocument(saved.document); applyPlaybackRange(saved.document);
+          const eventRows = new Set(saved.document.tracks.filter(track => track.type === "event").map(track => track.id));
+          const migrated = { ...saved.document, clips: saved.document.clips.filter(clip => !eventRows.has(clip.rowId)), events: [...(saved.document.events ?? []), ...saved.document.clips.filter(clip => eventRows.has(clip.rowId)).map(clip => ({ kind: "event-cue" as const, id: timelineId<"cue">(clip.id), rowId: clip.rowId, label: clip.label, time: clip.range.start, color: clip.color, eventType: "event", disabled: clip.disabled }))] };
+          current.current = migrated; setDocument(migrated); applyPlaybackRange(migrated);
           past.current = []; future.current = [];
           if (saved.audio.length) {
             const owner = { context: new AudioContext(), sources: new Map<string, ReturnType<typeof createTimelineAudio>>() };
@@ -304,8 +308,8 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     canEditClip: clip => document.clips.some(item => item.id === clip.id),
     canMoveClip: canMove,
     canDropFiles: rowId => isAudioTrack(document, rowId),
-    onSelectClip: setSelected,
-    onOpenClipProperties: setInspectorId,
+    onSelectClip: id => { setSelectedEvent(null); setSelected(id); },
+    onOpenClipProperties: id => { setEventInspectorId(null); setInspectorId(id); },
     onDropFiles: (files, rowId, time) => { setError(""); void load(files, rowId, time); },
     onResizeClip: resizeClip,
     onMoveClip: (id, rowId, start) => {
@@ -319,6 +323,26 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     },
     onUndo: undo, onRedo: redo,
   };
+  const moveEvent = (id: TimelineEventCue["id"], time: number) => {
+    if (!Number.isFinite(time) || !current.current.events?.some(event => event.id === id && event.time !== time)) return;
+    commit({ ...current.current, events: current.current.events.map(event => event.id === id ? { ...event, time } : event) });
+  };
+  const eventEditing: TimelineEventEditing = {
+    selectedId: selectedEvent,
+    canEdit: event => Boolean(document.events?.some(item => item.id === event.id)),
+    onSelect: id => { setSelected(null); setSelectedEvent(id); },
+    onMove: moveEvent,
+    onOpenProperties: id => { setInspectorId(null); setEventInspectorId(id); },
+    onDelete: id => { commit({ ...current.current, events: current.current.events?.filter(event => event.id !== id) }); setSelectedEvent(null); },
+  };
+  const inspectedEvent = document.events?.find(event => event.id === eventInspectorId);
+  const eventProperties = inspectedEvent && <aside className="timeline-editor__properties" aria-label="Event properties">
+    <header className="timeline-editor__properties-header"><strong>Event</strong><button type="button" className="timeline-editor__button" aria-label="Close properties" title="Close" onClick={() => setEventInspectorId(null)}>×</button></header>
+    <div className="timeline-editor__properties-content"><div className="timeline-editor__property-name">{inspectedEvent.label}</div>
+      <dl><dt>Time</dt><dd><TimeField {...timeDisplay} label="Event time" value={inspectedEvent.time} onCommit={time => moveEvent(inspectedEvent.id, time)} /></dd></dl>
+      <label><input type="checkbox" checked={inspectedEvent.disabled ?? false} onChange={event => commit({ ...current.current, events: current.current.events?.map(item => item.id === inspectedEvent.id ? { ...item, disabled: event.target.checked } : item) })} />Disable</label>
+    </div>
+  </aside>;
   const inspected = document.clips.find(clip => clip.id === inspectorId);
   const updateProperties = (id: TimelineClip["id"], patch: Partial<Pick<DemoClip, "disabled" | "volume" | "loop">>) => {
     const old = current.current.clips.find(clip => clip.id === id);
@@ -406,6 +430,9 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
       if (time >= (snapshot.range?.end ?? snapshot.duration)) return;
       if (track.type === "audio") {
         fileTarget.current = { rowId: row.id, time }; fileInput.current?.click();
+      } else if (track.type === "event") {
+        const event: TimelineEventCue = { kind: "event-cue", id: timelineId<"cue">(`event-${crypto.randomUUID()}`), rowId: row.id, label: "Event", time, color: trackTypes.event.color, eventType: "event" };
+        commit({ ...current.current, events: [...(current.current.events ?? []), event] });
       } else {
         const id = timelineId<"clip">(`clip-${crypto.randomUUID()}`);
         commit({ ...current.current, clips: [...current.current.clips, { id, rowId: row.id, kind: "clip", label: track.type === "animation" ? "Animation" : "Event", sourceDuration: track.type === "animation" ? 12 : undefined, color: trackTypes[track.type].color, range: { start: time, end: time + (track.type === "animation" ? 12 : 1) } }] });
@@ -419,7 +446,7 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     return <>
       <button className="example-track-action" aria-label={`Mute ${row.label}`} aria-pressed={track.muted ?? false} title="Mute track" onClick={() => toggle("muted")}>M</button>
       <button className="example-track-action" aria-label={`Solo ${row.label}`} aria-pressed={track.solo ?? false} title="Solo track (same media type)" onClick={() => toggle("solo")}>S</button>
-      <button className="example-track-action" aria-label={`Add clip to ${row.label}`} disabled={sample().time >= (sample().range?.end ?? sample().duration)} title="Add clip at playhead (inside playback range)" onClick={addClip}><svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg></button>
+      <button className="example-track-action" aria-label={`Add ${track.type === "event" ? "event" : "clip"} to ${row.label}`} disabled={sample().time >= (sample().range?.end ?? sample().duration)} title={`Add ${track.type === "event" ? "event" : "clip"} at playhead (inside playback range)`} onClick={addClip}><svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg></button>
     </>;
   };
   const filePicker = <input hidden ref={fileInput} type="file" accept="audio/*" multiple aria-label="Add audio clips" onChange={event => {
@@ -442,5 +469,5 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     <button className="timeline-editor__button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!future.current.length} onClick={redo}>↷</button>
   </>;
   const renameRow = (id: RowId, label: string) => commit({ ...current.current, tracks: current.current.tracks.map(track => track.id === id ? { ...track, label } : track) });
-  return { document, changePlaybackRange, collapsed, toggleRow, moveRow, reorderRow, ready, saving, toolbar, addTrack, rowIcon, rowActions, renameRow, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
+  return { document, changePlaybackRange, collapsed, toggleRow, moveRow, reorderRow, ready, saving, toolbar, addTrack, rowIcon, rowActions, renameRow, filePicker, editing, eventEditing, properties: eventProperties ?? properties, preview, controller: wrapped, error, dismissError: () => setError("") };
 }

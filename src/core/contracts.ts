@@ -66,6 +66,8 @@ interface TimelineItemBase {
   rowId: RowId;
   label: string;
   selected?: boolean;
+  /** Excluded from host evaluation, but still editable. */
+  disabled?: boolean;
 }
 
 export interface TimelineClip extends TimelineItemBase {

@@ -436,3 +436,8 @@ button.timeline-editor__row-disclosure { background: none; border: 0; padding: 0
 .timeline-editor__row[data-drop-position="after"]::after { content: ""; position: absolute; left: 3px; right: 0; height: 2px; background: var(--timeline-accent); pointer-events: none; z-index: 2; }
 .timeline-editor__row[data-drop-position="before"]::after { top: 0; }
 .timeline-editor__row[data-drop-position="after"]::after { bottom: 0; }
+
+.timeline-editor__event-cue { position: absolute; z-index: 2; display: inline-flex; align-items: center; justify-content: center; width: 20px; padding: 0; border: 0; background: none; font: inherit; font-size: .65rem; cursor: ew-resize; white-space: nowrap; touch-action: none; }
+.timeline-editor__event-cue svg { flex: none; }
+.timeline-editor__event-cue.is-disabled { opacity: .4; }
+.timeline-editor__event-cue:focus-visible { outline: 1px solid var(--timeline-accent); }

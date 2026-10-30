@@ -78,7 +78,7 @@ test("drop preview and placement use zoomed and scrolled track coordinates", asy
   const clip = page.getByRole("button", { name: "Clip placed.wav" });
   await expect(clip).toHaveAttribute("data-start", "5");
   await expect(clip).toHaveAttribute("data-row-id", await page.locator(".timeline-editor__row").filter({ has: page.locator(".timeline-editor__row-label", { hasText: /^Audio 2$/ }) }).locator(".timeline-editor__row-binding").innerText());
-  await drop(page, 5, 2, "rejected.wav"); // animation track rejects audio
+  await drop(page, 5, 1, "rejected.wav"); // animation track rejects audio
   await expect(page.getByRole("button", { name: "Clip rejected.wav" })).toHaveCount(0);
 });
 
@@ -243,8 +243,8 @@ test("track divider resizes and row plus adds clips at the playhead", async ({ p
   await expect(page.getByRole("button", { name: "Clip Animation", exact: true })).toHaveCount(2);
   await expect(page.getByRole("button", { name: "Clip Animation", exact: true }).last()).toHaveAttribute("data-start", "3");
   await addTrack(page, "event");
-  await page.getByRole("button", { name: "Add clip to Event 1", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Clip Event", exact: true })).toHaveAttribute("data-start", "3");
+  await page.getByRole("button", { name: "Add event to Event 1", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Event Event", exact: true })).toHaveAttribute("data-time", "3");
   const chooserEvent = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "Add clip to Audio 1", exact: true }).click();
   const chooser = await chooserEvent;
@@ -328,7 +328,7 @@ test("project edits and original audio survive reload and still play", async ({ 
   await page.getByRole("textbox", { name: "Track name" }).press("Enter");
   await page.getByRole("button", { name: "Solo Music", exact: true }).click();
   await addTrack(page, "event");
-  await page.getByRole("button", { name: "Add clip to Event 1" }).click();
+  await page.getByRole("button", { name: "Add event to Event 1" }).click();
   const motion = page.getByRole("button", { name: "Clip Animation", exact: true });
   await motion.click();
   await page.getByRole("application", { name: "Timeline scrubber" }).press("Control+ArrowRight");
@@ -345,7 +345,7 @@ test("project edits and original audio survive reload and still play", async ({ 
   await expect(page.getByLabel("Disable", { exact: true })).toBeChecked();
   await page.getByRole("button", { name: "Close properties" }).click();
   await expect(page.getByRole("button", { name: "Solo Music", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: "Clip Event", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Event Event", exact: true })).toBeVisible();
   await expect(clip.locator("path")).toHaveAttribute("d", waveform!);
   await clip.dblclick({ position: { x: 40, y: 20 } });
   await expect(volume).toHaveValue("0.4");
@@ -374,7 +374,7 @@ test("failed project writes retain the previous saved document", async ({ page }
   await expect(page.getByRole("alert")).toContainText("could not be saved");
   await page.reload();
   await expect(page.getByRole("status")).toHaveText("Untitled");
-  await expect(page.getByRole("button", { name: "Add clip to Event 1" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add event to Event 1" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add clip to Animation 1", exact: true })).toHaveCount(0);
 });
 
@@ -391,7 +391,7 @@ test("an unreadable project is not overwritten by subsequent edits", async ({ pa
   await addTrack(page, "event");
   await page.reload();
   await expect(page.getByRole("alert")).toContainText("automatic saving is disabled");
-  await expect(page.getByRole("button", { name: "Add clip to Event 1" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Add event to Event 1" })).toHaveCount(0);
 });
 
 test("audio decode failure preserves the saved project and reports unsaved state", async ({ page }) => {
@@ -411,7 +411,7 @@ test("audio decode failure preserves the saved project and reports unsaved state
   await addTrack(page, "event");
   await page.reload();
   await expect(page.getByRole("status")).toHaveText("Untitled*");
-  await expect(page.getByRole("button", { name: "Add clip to Event 1" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Add event to Event 1" })).toHaveCount(0);
 });
 
 test("a stale session cannot replace a saved project", async ({ page }) => {
@@ -429,7 +429,7 @@ test("a stale session cannot replace a saved project", async ({ page }) => {
   });
   await page.reload();
   await expect(page.getByRole("status")).toHaveText("Untitled");
-  await expect(page.getByRole("button", { name: "Add clip to Event 1" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add event to Event 1" })).toBeVisible();
 });
 
 async function enterTime(page: Page, label: string, value: string) {

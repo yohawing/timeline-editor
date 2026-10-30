@@ -21,6 +21,8 @@ function validProject(value: SavedProject): boolean {
       parent = group.parentId;
     }
   }
+  const events = value.document.events ?? [];
+  if (!Array.isArray(events) || new Set(events.map(event => event?.id)).size !== events.length || !events.every(event => event && event.kind === "event-cue" && typeof event.id === "string" && typeof event.label === "string" && typeof event.eventType === "string" && typeof event.color === "string" && Number.isFinite(event.time) && tracks.some(track => track.id === event.rowId && track.type === "event") && (event.disabled === undefined || typeof event.disabled === "boolean"))) return false;
   const range = value.document.playbackRange;
   if (range && (!Number.isFinite(range.start) || !Number.isFinite(range.end) || range.end <= range.start)) return false;
   if (new Set(tracks.map(track => track.id)).size !== tracks.length || new Set(clips.map(clip => clip?.id)).size !== clips.length) return false;
