@@ -145,6 +145,7 @@
 .timeline-editor__fps-select option { background: var(--timeline-surface-2); color: var(--timeline-text); }
 
 .timeline-editor__body {
+  position: relative;
   display: grid;
   grid-template-columns: var(--timeline-tree-width) minmax(0, 1fr);
   grid-template-rows: var(--timeline-ruler-height) minmax(0, 1fr) var(--timeline-range-bar-height);
@@ -358,7 +359,7 @@
 .timeline-editor--compact .timeline-editor__row-binding,
 .timeline-editor--compact .timeline-editor__row-state { display: none; }
 .timeline-editor--compact .timeline-editor__row-color { height: 0.625rem; margin-right: 0.3125rem; } /* 10px, 5px */
-.timeline-editor--compact .timeline-editor__body { grid-template-columns: 9.375rem minmax(0, 1fr); } /* 150px */
+.timeline-editor--compact { --timeline-tree-width: 9.375rem; } /* 150px initial width */
 
 @media (max-width: 760px) {
   .timeline-editor__fps { display: none; }
@@ -373,3 +374,10 @@
 .timeline-editor__drop-preview span { position: absolute; bottom: 0; left: 5px; white-space: nowrap; background: #392f1b; color: #ffe6ac; padding: 2px 5px; font-size: 11px; }
 
 .timeline-editor__button--text { width: auto; min-width: 2.25rem; padding: 0 0.375rem; white-space: nowrap; }
+
+.timeline-editor__track-divider { position: absolute; z-index: 8; left: calc(var(--timeline-tree-width) - 3px); top: 0; bottom: 0; width: 6px; cursor: col-resize; }
+.timeline-editor__track-divider:hover, .timeline-editor__track-divider:focus-visible { background: #6c91bc66; outline: none; }
+.timeline-editor__row-actions { display: inline-flex; gap: 3px; margin-left: auto; flex: none; }
+
+.timeline-editor__row-label[role="button"] { flex: 1; cursor: pointer; }
+.timeline-editor__row-label[role="button"]:focus-visible { outline: 1px solid var(--timeline-accent); }

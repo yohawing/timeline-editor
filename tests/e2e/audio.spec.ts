@@ -24,7 +24,7 @@ async function addTrack(page: Page, type: string) {
 test("two panes: drop at cursor, waveform, drag, cancel, delete, undo and redo", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByLabel("Animation preview")).toBeVisible();
-  await expect(page.locator("input[type=file]")).toHaveCount(0);
+  await expect(page.locator("input[type=file]")).toBeHidden();
   await drop(page, 2);
   const clip = page.getByRole("button", { name: "Clip dropped.wav", exact: true });
   await expect(clip).toHaveAttribute("data-start", "2");
@@ -175,23 +175,25 @@ test("inspector mute/solo changes real audio voices, volume is undoable, and hea
   const panel = page.getByRole("complementary", { name: "Clip properties" });
   await expect(panel).toBeVisible(); await expect(panel.getByRole("slider")).toHaveCount(0);
   await page.getByRole("button", { name: "Skip to end", exact: true }).click();
-  await expect.poll(async () => Number(await page.getByLabel("Animation preview").getAttribute("data-motion-time"))).toBe(12);
-  await panel.getByLabel("Mute", { exact: true }).check();
+  await page.getByRole("application", { name: "Timeline scrubber" }).press("ArrowLeft");
+  await expect.poll(async () => Number(await page.getByLabel("Animation preview").getAttribute("data-motion-time"))).toBeGreaterThan(11);
+  await panel.getByLabel("Disable", { exact: true }).check();
   await expect.poll(async () => Number(await page.getByLabel("Animation preview").getAttribute("data-motion-time"))).toBe(0);
-  await panel.getByLabel("Mute", { exact: true }).uncheck();
+  await panel.getByLabel("Disable", { exact: true }).uncheck();
   await page.getByRole("button", { name: "Skip to start", exact: true }).click();
   await panel.getByRole("button", { name: "Close properties" }).click();
   await drop(page, 0, 0, "first.wav"); await addTrack(page, "audio"); await drop(page, 0, 1, "second.wav");
   const first = page.getByRole("button", { name: "Clip first.wav", exact: true });
   await first.dblclick({ position: { x: 30, y: 20 } });
-  await panel.getByLabel("Mute", { exact: true }).check();
+  await drop(page, 0, 0, "sibling.wav");
+  await page.getByRole("button", { name: "Mute Audio 1", exact: true }).click();
   await page.getByRole("button", { name: "Play", exact: true }).click();
   const active = () => page.evaluate(() => (window as unknown as { voices: { active: boolean }[] }).voices.filter(v => v.active).length);
   await expect.poll(active).toBe(1);
-  await panel.getByLabel("Mute", { exact: true }).uncheck(); await expect.poll(active).toBe(2);
-  await panel.getByLabel("Solo", { exact: true }).check(); await expect.poll(active).toBe(1);
+  await page.getByRole("button", { name: "Mute Audio 1", exact: true }).click(); await expect.poll(active).toBe(3);
+  await page.getByRole("button", { name: "Solo Audio 1", exact: true }).click(); await expect.poll(active).toBe(2);
   await expect.poll(async () => Number(await page.getByLabel("Animation preview").getAttribute("data-motion-time"))).toBeGreaterThan(0);
-  await panel.getByLabel("Mute", { exact: true }).check(); await expect.poll(active).toBe(0);
+  await page.getByRole("button", { name: "Mute Audio 1", exact: true }).click(); await expect.poll(active).toBe(0);
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   const slider = panel.getByRole("slider", { name: "Volume" });
   const bounds = (await slider.boundingBox())!;
@@ -216,6 +218,63 @@ test("inspector mute/solo changes real audio voices, volume is undoable, and hea
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await expect(slider).toHaveValue("1"); await expect(added).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("properties.png") });
+});
+
+test("track divider resizes and row plus adds clips at the playhead", async ({ page }) => {
+  await page.goto("/");
+  const divider = page.getByRole("separator", { name: "Track panel width" });
+  const box = (await divider.boundingBox())!;
+  const tree = page.locator(".timeline-editor__tree-heading");
+  const width = () => tree.evaluate(el => el.getBoundingClientRect().width);
+  const initial = await width();
+  await page.mouse.move(box.x + 3, box.y + 50); await page.mouse.down();
+  await page.mouse.move(box.x + 103, box.y + 50, { steps: 5 }); await page.mouse.up();
+  await expect.poll(width).toBeCloseTo(initial + 100, 0);
+  await divider.press("ArrowLeft"); await expect.poll(width).toBeCloseTo(initial + 90, 0);
+  await drop(page, 2, 0, "resized.wav");
+  await expect(page.getByRole("button", { name: "Clip resized.wav" })).toHaveAttribute("data-start", "2");
+  await divider.press("Home"); await expect.poll(width).toBe(initial);
+  const ruler = (await page.locator(".timeline-editor__ruler").boundingBox())!;
+  await page.mouse.click(ruler.x + ruler.width / 4, ruler.y + 3);
+  await page.getByRole("button", { name: "Add clip to Root Motion", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Clip Animation", exact: true })).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "Clip Animation", exact: true }).last()).toHaveAttribute("data-start", "3");
+  await addTrack(page, "event");
+  await page.getByRole("button", { name: "Add clip to Event 1", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Clip Event", exact: true })).toHaveAttribute("data-start", "3");
+  const chooserEvent = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "Add clip to Audio 1", exact: true }).click();
+  const chooser = await chooserEvent;
+  const bytes = await page.evaluate(async () => {
+    const module = await import(/* @vite-ignore */ "/src/audioDemo.tsx");
+    return Array.from(new Uint8Array(module.clickTrack()));
+  });
+  await chooser.setFiles({ name: "from-plus.wav", mimeType: "audio/wav", buffer: Buffer.from(bytes) });
+  await expect(page.getByRole("button", { name: "Clip from-plus.wav", exact: true })).toHaveAttribute("data-start", "3");
+  await page.screenshot({ path: test.info().outputPath("track-controls.png") });
+});
+
+test("compact divider tracks its column and end-of-range additions are disabled", async ({ page }) => {
+  await page.goto("/?variant=compact");
+  const divider = page.getByRole("separator", { name: "Track panel width" });
+  const heading = page.locator(".timeline-editor__tree-heading");
+  const initial = (await heading.boundingBox())!;
+  expect(initial.width).toBe(150);
+  await divider.press("ArrowRight");
+  await expect.poll(() => heading.evaluate(el => el.getBoundingClientRect().width)).toBe(160);
+  const bar = (await divider.boundingBox())!;
+  const column = (await heading.boundingBox())!;
+  expect(bar.x + bar.width / 2).toBeCloseTo(column.x + column.width, 0);
+  await divider.press("Home");
+  await expect.poll(() => heading.evaluate(el => el.getBoundingClientRect().width)).toBe(150);
+  await page.getByRole("button", { name: "Skip to end", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Add clip to Root Motion", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Add clip to Audio 1", exact: true })).toBeDisabled();
+  // With no active motion at the half-open end, the ball is absent.
+  await expect.poll(() => page.getByLabel("Animation preview").evaluate((canvas: HTMLCanvasElement) => {
+    const pixel = canvas.getContext("2d")!.getImageData(Math.round(canvas.width * 0.85), Math.round(canvas.height * 0.7 - 24 * devicePixelRatio), 1, 1).data;
+    return Array.from(pixel).slice(0, 3);
+  })).toEqual([20, 23, 29]);
 });
 
 test("real Web Audio renders the requested offset and rate", async ({ page }) => {

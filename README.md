@@ -141,10 +141,18 @@ the preview to inspect your device; hardware latency compensation is not applied
 ### Clip properties
 
 Double-click an editable clip to open the demo's right-side inspector. Mute and
-Solo are undoable per-clip properties; solo applies within the same media type,
-so soloing audio does not hide animation. Mute takes precedence over solo.
+Solo live on each track row and affect every clip on that track. Solo applies
+within the same media type, so soloing audio does not hide animation. Mute takes
+precedence over solo. Clips have an independent Disable property.
 Audio volume is a linear 0–200% gain; a slider drag is one undo step and keyboard
 steps are individual edits. Gain changes do not restart the audio source.
 The optional `TimelineEditing.onOpenClipProperties(id)` callback requests a
 host-owned inspector. The core does not impose a panel, property schema or solo
 policy. `createTimelineAudio().setVolume(value)` supplies only the gain primitive.
+
+The track/timeline separator supports pointer dragging, Left/Right (10px),
+Home or double-click (reset), and Escape during dragging (cancel). A host can
+supply row controls with `slots.rowActions(row)`; the library does not impose
+track mute/solo state or an add-clip policy. In the demo, each row's + adds a clip
+at the playhead: audio opens a file chooser; Animation adds a procedural preview
+motion; Event adds an editable placeholder section (no event dispatch runtime).

@@ -61,6 +61,7 @@ import {
   type TimelinePlaybackTarget,
 } from "../core/playback";
 import "../styles/timeline.css";
+import { TrackDivider } from "./TrackDivider";
 import { useClipEditing, type TimelineEditing } from "./clipEditing";
 export type { TimelineEditing } from "./clipEditing";
 import {
@@ -91,6 +92,8 @@ export interface TimelinePerformanceSummary {
 
 export interface TimelineEditorSlots {
   tracksHeaderEnd?: ReactNode;
+  /** Host-owned controls for each visible row. */
+  rowActions?: (row: TimelineRow) => ReactNode;
   toolbarStart?: ReactNode;
   toolbarEnd?: ReactNode;
   emptyState?: ReactNode;
@@ -454,6 +457,7 @@ export function TimelineEditor({
    * probe below measures the scaled result, so the canvas and the DOM row
    * strip follow it with no further plumbing.
    */
+  const [treeWidth, setTreeWidth] = useState<number | null>(null);
   const [snap, setSnap] = useState(true);
   const [rowZoom, setRowZoom] = useState(1);
   // A scrollLeft to apply after the next commit — set together with a zoom
@@ -1062,7 +1066,7 @@ export function TimelineEditor({
   } : undefined;
 
   return (
-    <section onKeyDown={onViewportKeyDown} className={rootClassName} aria-label="Timeline editor" style={{ "--timeline-row-zoom": rowZoom } as CSSProperties}>
+    <section onKeyDown={onViewportKeyDown} className={rootClassName} aria-label="Timeline editor" style={{ "--timeline-row-zoom": rowZoom, ...(treeWidth === null ? {} : { "--timeline-tree-width": `min(${treeWidth}px, max(120px, calc(100% - 160px)))` }) } as CSSProperties}>
       <div ref={rowHeightProbeRef} className="timeline-editor__row-height-probe" aria-hidden="true" />
       <header className="timeline-editor__header">
         <div className="timeline-editor__toolbar">
@@ -1116,12 +1120,13 @@ export function TimelineEditor({
         </div>
       </header>
       <div className="timeline-editor__body">
+        <TrackDivider onResize={setTreeWidth} />
         <div className="timeline-editor__tree-heading"><span>TRACKS</span><div className="timeline-editor__slot">{slots?.tracksHeaderEnd}</div></div>
         <div className="timeline-editor__tree-viewport" ref={treeViewportRef} onScroll={onTreeScroll}>
           <div className="timeline-editor__tree-content" style={{ height: totalHeight }}>
             {rows.map((row, index) => {
               const target = rowTargets.get(row.id);
-              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} rowHeight={rowHeight} />;
+              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} rowHeight={rowHeight} actions={slots?.rowActions?.(row)} />;
             })}
             {rowCount === 0 && <div className="timeline-editor__empty">{slots?.emptyState ?? "No timeline tracks"}</div>}
           </div>
@@ -1230,6 +1235,7 @@ function TimelineRowView({
   selected,
   onSelect,
   rowHeight,
+  actions,
 }: {
   row: TimelineRow;
   index: number;
@@ -1237,6 +1243,7 @@ function TimelineRowView({
   selected: boolean;
   onSelect: (target: TimelinePlaybackTarget) => void;
   rowHeight: number;
+  actions?: ReactNode;
 }): ReactElement {
   const targetProps = target ? {
     role: "button" as const,
@@ -1244,7 +1251,7 @@ function TimelineRowView({
     "aria-pressed": selected,
     "aria-label": `Select playback target ${row.label}`,
     onClick: () => onSelect(target),
-    onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => {
+    onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         onSelect(target);
@@ -1252,10 +1259,11 @@ function TimelineRowView({
     },
   } : {};
   return (
-    <div className={`timeline-editor__row timeline-editor__row--${row.kind}${target ? " timeline-editor__row--target" : ""}${selected ? " is-target-selected" : ""}`} style={{ transform: `translateY(${index * rowHeight}px)` }} {...targetProps}>
+    <div className={`timeline-editor__row timeline-editor__row--${row.kind}${target ? " timeline-editor__row--target" : ""}${selected ? " is-target-selected" : ""}`} style={{ transform: `translateY(${index * rowHeight}px)` }} {...(actions ? {} : targetProps)}>
       <span className="timeline-editor__row-color" style={{ backgroundColor: row.color ?? "#6c7284" }} />
       <span className="timeline-editor__row-disclosure">{row.kind === "group" ? "▾" : ""}</span>
-      <span className="timeline-editor__row-label" style={{ paddingLeft: `${Math.max(0, row.depth) * 10 * (rowHeight / TIMELINE_ROW_HEIGHT)}px` }}>{row.label}</span>
+      <span {...(actions ? targetProps : {})} className="timeline-editor__row-label" style={{ paddingLeft: `${Math.max(0, row.depth) * 10 * (rowHeight / TIMELINE_ROW_HEIGHT)}px` }}>{row.label}</span>
+      {actions && <span className="timeline-editor__row-actions" onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>{actions}</span>}
       {row.bindingId && <span className="timeline-editor__row-binding">{String(row.bindingId).replace(/^binding-/, "")}</span>}
       {row.muted && <span className="timeline-editor__row-state">M</span>}
       {row.locked && <span className="timeline-editor__row-state">L</span>}

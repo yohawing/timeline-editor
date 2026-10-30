@@ -75,7 +75,7 @@ function Example(): JSX.Element {
           playbackController={audio.controller}
           frameRate={Number.isFinite(fps) && fps > 0 ? fps : 24}
           variant={variant}
-          slots={{ toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack }}
+          slots={{ toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack, rowActions: audio.rowActions }}
           onDiagnostic={(diagnostic) => console.warn(diagnostic.message, diagnostic.error)}
           onPerformanceSummary={(summary) => {
             const runtime = globalThis as { __timelinePerf?: unknown; __timelinePerfSamples?: unknown[] };
@@ -85,6 +85,7 @@ function Example(): JSX.Element {
         />
         {audio.error && <div className="example-error" role="alert">{audio.error}<button aria-label="Dismiss error" onClick={audio.dismissError}>×</button></div>}
       </div>
+      {audio.filePicker}
       {audio.properties}
     </main>
   );

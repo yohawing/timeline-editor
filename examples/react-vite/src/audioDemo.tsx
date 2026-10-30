@@ -1,7 +1,7 @@
 import { TrackMenu } from "./TrackMenu";
 import { useEffect, useRef, useState } from "react";
 import { createTimelineAudio } from "@yohawing/timeline-editor/audio";
-import { projectTimelinePlaybackTime, timelineId, type TimelineClip, type RowId, type TimelineDataSource, type TimelinePlaybackController } from "@yohawing/timeline-editor/core";
+import { projectTimelinePlaybackTime, timelineId, type TimelineClip, type RowId, type TimelineRow, type TimelineDataSource, type TimelinePlaybackController } from "@yohawing/timeline-editor/core";
 import type { TimelineEditing } from "@yohawing/timeline-editor";
 export { createTimelineAudio };
 
@@ -30,15 +30,15 @@ const trackTypes = {
   event: { label: "Event", color: "#dbb56e", targetKind: "property" },
 } as const;
 type TrackType = keyof typeof trackTypes;
-interface Track { id: RowId; type: TrackType }
-interface DemoClip extends TimelineClip { muted?: boolean; solo?: boolean; volume?: number }
+interface Track { id: RowId; type: TrackType; external?: boolean; muted?: boolean; solo?: boolean }
+interface DemoClip extends TimelineClip { disabled?: boolean; volume?: number }
 interface Document { tracks: readonly Track[]; clips: readonly DemoClip[] }
 const firstTrack: Track = { id: timelineId<"row">("audio-track-1"), type: "audio" };
 const isAudioTrack = (document: Document, id: RowId) => document.tracks.some(track => track.id === id && track.type === "audio");
 
 export function withAudioRows(base: TimelineDataSource, document: Document): TimelineDataSource {
   const counts = { audio: 0, animation: 0, event: 0 };
-  const tracks = document.tracks.map(({ id, type }) => ({ id, label: `${trackTypes[type].label} ${++counts[type]}`, kind: "track" as const, depth: 0, color: trackTypes[type].color, bindingId: timelineId<"binding">(id), targetKind: trackTypes[type].targetKind }));
+  const tracks = document.tracks.filter(track => !track.external).map(({ id, type }) => ({ id, label: `${trackTypes[type].label} ${++counts[type]}`, kind: "track" as const, depth: 0, color: trackTypes[type].color, bindingId: timelineId<"binding">(id), targetKind: trackTypes[type].targetKind }));
   return {
     ...base,
     getBindings: () => [...tracks.map(row => ({ id: row.bindingId, label: row.label, targetKind: row.targetKind })), ...base.getBindings()],
@@ -52,7 +52,7 @@ export function withAudioRows(base: TimelineDataSource, document: Document): Tim
 }
 
 export function useAudioDemo(controller: TimelinePlaybackController, motion: TimelineClip | null) {
-  const [document, setDocument] = useState<Document>({ tracks: [firstTrack], clips: motion ? [motion] : [] });
+  const [document, setDocument] = useState<Document>({ tracks: [firstTrack, ...(motion ? [{ id: motion.rowId, type: "animation" as const, external: true }] : [])], clips: motion ? [motion] : [] });
   const current = useRef(document);
   const past = useRef<Document[]>([]);
   const future = useRef<Document[]>([]);
@@ -62,6 +62,8 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
   const selectedRef = useRef(selected); selectedRef.current = selected;
   const runtime = useRef<{ context: AudioContext; sources: Map<string, ReturnType<typeof createTimelineAudio>> } | null>(null);
   const preview = useRef<HTMLCanvasElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const fileTarget = useRef<{ rowId: RowId; time: number } | null>(null);
   const serial = useRef(1);
   const epoch = useRef(0);
   const loadOperation = useRef(0);
@@ -71,7 +73,10 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     return { ...value, time: projectTimelinePlaybackTime(value) };
   };
   const typeOf = (clip: TimelineClip) => current.current.tracks.find(track => track.id === clip.rowId)?.type ?? (clip.id === motion?.id ? "animation" : undefined);
-  const enabled = (clip: DemoClip) => !clip.muted && (!current.current.clips.some(other => other.solo && typeOf(other) === typeOf(clip)) || Boolean(clip.solo));
+  const enabled = (clip: DemoClip) => {
+    const track = current.current.tracks.find(track => track.id === clip.rowId);
+    return !clip.disabled && !track?.muted && (!current.current.tracks.some(other => other.solo && other.type === typeOf(clip)) || Boolean(track?.solo));
+  };
   const sync = (force = false) => {
     const value = sample();
     for (const [id, audio] of runtime.current?.sources ?? []) {
@@ -144,7 +149,8 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
         context.strokeStyle = "#282e39"; context.lineWidth = 1;
         const floor = height * 0.7;
         context.beginPath(); context.moveTo(0, floor); context.lineTo(width, floor); context.stroke();
-        const motionClip = current.current.clips.find(clip => clip.id === motion?.id && enabled(clip));
+        const animations = current.current.clips.filter(clip => typeOf(clip) === "animation" && enabled(clip));
+        const motionClip = [...animations].reverse().find(clip => value.time >= clip.range.start && value.time < clip.range.end);
         const motionTime = motionClip ? Math.max(0, Math.min(motionClip.range.end - motionClip.range.start, value.time - motionClip.range.start)) : 0;
         canvas.dataset.motionTime = motionTime.toFixed(3);
         const phase = motionTime % 1;
@@ -194,7 +200,7 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     onUndo: undo, onRedo: redo,
   };
   const inspected = document.clips.find(clip => clip.id === inspectorId);
-  const updateProperties = (id: TimelineClip["id"], patch: Partial<Pick<DemoClip, "muted" | "solo" | "volume">>) => {
+  const updateProperties = (id: TimelineClip["id"], patch: Partial<Pick<DemoClip, "disabled" | "volume">>) => {
     const old = current.current.clips.find(clip => clip.id === id);
     if (!old || Object.entries(patch).every(([key, value]) => old[key as keyof DemoClip] === value)) return;
     const next = { ...current.current, clips: current.current.clips.map(clip => clip.id === id ? { ...clip, ...patch } : clip) };
@@ -214,8 +220,7 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     <div className="example-property-name" title={inspected.label}>{inspected.label}</div>
     <dl><dt>Start</dt><dd>{inspected.range.start.toFixed(3)} s</dd><dt>Duration</dt><dd>{(inspected.range.end - inspected.range.start).toFixed(3)} s</dd></dl>
     <div className="example-property-toggles">
-      <label><input type="checkbox" checked={inspected.muted ?? false} onChange={event => updateProperties(inspected.id, { muted: event.target.checked })} />Mute</label>
-      <label title="Solo within the same media type; Mute takes precedence"><input type="checkbox" checked={inspected.solo ?? false} onChange={event => updateProperties(inspected.id, { solo: event.target.checked })} />Solo</label>
+      <label><input type="checkbox" checked={inspected.disabled ?? false} onChange={event => updateProperties(inspected.id, { disabled: event.target.checked })} />Disable</label>
     </div>
     {typeOf(inspected) === "audio" && <label className="example-property-volume">Volume <output>{Math.round((inspected.volume ?? 1) * 100)}%</output>
       <input aria-label="Volume" type="range" min="0" max="2" step="0.01" value={inspected.volume ?? 1}
@@ -225,6 +230,33 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
         onBlur={() => finishVolume()} />
     </label>}
   </aside>;
+  const rowActions = (row: TimelineRow) => {
+    const track = document.tracks.find(track => track.id === row.id);
+    if (!track) return null;
+    const toggle = (key: "muted" | "solo") => commit({ ...current.current, tracks: current.current.tracks.map(item => item.id === row.id ? { ...item, [key]: !item[key] } : item) });
+    const addClip = () => {
+      const snapshot = sample();
+      const time = snapshot.time;
+      if (time >= (snapshot.range?.end ?? snapshot.duration)) return;
+      if (track.type === "audio") {
+        fileTarget.current = { rowId: row.id, time }; fileInput.current?.click();
+      } else {
+        const id = timelineId<"clip">(`clip-${++serial.current}`);
+        commit({ ...current.current, clips: [...current.current.clips, { id, rowId: row.id, kind: "clip", label: track.type === "animation" ? "Animation" : "Event", color: trackTypes[track.type].color, range: { start: time, end: time + (track.type === "animation" ? 12 : 1) } }] });
+        setSelected(id);
+      }
+    };
+    return <>
+      <button className="example-track-action" aria-label={`Mute ${row.label}`} aria-pressed={track.muted ?? false} title="Mute track" onClick={() => toggle("muted")}>M</button>
+      <button className="example-track-action" aria-label={`Solo ${row.label}`} aria-pressed={track.solo ?? false} title="Solo track (same media type)" onClick={() => toggle("solo")}>S</button>
+      <button className="example-track-action" aria-label={`Add clip to ${row.label}`} disabled={sample().time >= (sample().range?.end ?? sample().duration)} title="Add clip at playhead (inside playback range)" onClick={addClip}><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg></button>
+    </>;
+  };
+  const filePicker = <input hidden ref={fileInput} type="file" accept="audio/*" multiple aria-label="Add audio clips" onChange={event => {
+    const target = fileTarget.current; fileTarget.current = null;
+    if (target) { setError(""); void load(Array.from(event.target.files ?? []), target.rowId, target.time); }
+    event.target.value = "";
+  }} />;
   const addTrack = <TrackMenu options={Object.entries(trackTypes).map(([value, info]) => ({ value, label: `${info.label} Track` }))} onAdd={value => {
     const type = value as TrackType;
     if (Object.prototype.hasOwnProperty.call(trackTypes, type)) commit({ ...current.current, tracks: [...current.current.tracks, { id: timelineId<"row">(`${type}-track-${++serial.current}`), type }] });
@@ -233,5 +265,5 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     <button className="timeline-editor__button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.current.length} onClick={undo}>↶</button>
     <button className="timeline-editor__button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!future.current.length} onClick={redo}>↷</button>
   </>;
-  return { document, toolbar, addTrack, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
+  return { document, toolbar, addTrack, rowActions, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
 }
