@@ -7,6 +7,7 @@ import {
   createStressTimelineDataSource,
   type TimelinePlaybackController,
   type TimelineDataSource,
+  type TimelineClip,
   timelineId,
 } from "@yohawing/timeline-editor/core";
 import "@yohawing/timeline-editor/styles.css";
@@ -58,7 +59,8 @@ function Example(): JSX.Element {
       dispatch: () => Promise.reject(new Error("example transport rejected")),
     } satisfies TimelinePlaybackController;
   }, [malformed, reject]);
-  const audio = useAudioDemo(playbackController);
+  const motion = useMemo(() => stress ? null : dataSource.getItems({ rowIds: dataSource.getRows({ start: 0, count: dataSource.getRowCount() }).map(row => row.id), range: dataSource.getRange() }).find((item): item is TimelineClip => item.kind === "clip" && item.id === "preview-animation") ?? null, [dataSource, stress]);
+  const audio = useAudioDemo(playbackController, motion);
   const audioData = useMemo(() => withAudioRows(dataSource, audio.document), [dataSource, audio.document]);
   return (
     <main className="example-shell">

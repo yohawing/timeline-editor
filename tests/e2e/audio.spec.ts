@@ -21,7 +21,7 @@ test("two panes: drop at cursor, waveform, drag, cancel, delete, undo and redo",
   await expect(page.getByLabel("Animation preview")).toBeVisible();
   await expect(page.locator("input[type=file]")).toHaveCount(0);
   await drop(page, 2);
-  const clip = page.getByRole("button", { name: "Audio clip dropped.wav", exact: true });
+  const clip = page.getByRole("button", { name: "Clip dropped.wav", exact: true });
   await expect(clip).toHaveAttribute("data-start", "2");
   await expect(clip.getByLabel("Audio waveform")).toBeVisible();
   expect((await clip.locator("path").getAttribute("d"))!.length).toBeGreaterThan(100);
@@ -44,7 +44,7 @@ test("two panes: drop at cursor, waveform, drag, cancel, delete, undo and redo",
   await viewport.press("Control+z");
   await page.getByRole("combobox", { name: "Add track" }).selectOption("audio");
   await drop(page, 1, 1, "second.wav");
-  await expect(page.getByRole("button", { name: "Audio clip second.wav", exact: true })).toHaveAttribute("data-start", "1");
+  await expect(page.getByRole("button", { name: "Clip second.wav", exact: true })).toHaveAttribute("data-start", "1");
   await drop(page, 4, 0, "broken.wav", true);
   await expect(page.getByRole("alert")).toBeVisible();
   await expect(clip).toBeVisible();
@@ -67,11 +67,60 @@ test("drop preview and placement use zoomed and scrolled track coordinates", asy
   await expect(page.locator(".timeline-editor__drop-preview")).toContainText("Audio 2 · 5.00 s");
   await drop(page, 5, 1, "placed.wav");
   await expect(page.locator(".timeline-editor__drop-preview")).toHaveCount(0);
-  const clip = page.getByRole("button", { name: "Audio clip placed.wav" });
+  const clip = page.getByRole("button", { name: "Clip placed.wav" });
   await expect(clip).toHaveAttribute("data-start", "5");
   await expect(clip).toHaveAttribute("data-row-id", "audio-track-2");
   await drop(page, 5, 2, "rejected.wav"); // animation track rejects audio
-  await expect(page.getByRole("button", { name: "Audio clip rejected.wav" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Clip rejected.wav" })).toHaveCount(0);
+});
+
+test("track menu creates typed tracks, supports undo, and limits audio drops", async ({ page }) => {
+  await page.goto("/");
+  const menu = page.getByRole("combobox", { name: "Add track" });
+  expect(await menu.evaluate(element => getComputedStyle(element).appearance)).toBe("none");
+  await menu.selectOption("animation");
+  await menu.selectOption("event");
+  await expect(page.locator(".timeline-editor__row-label")).toHaveText(["Audio 1", "Animation 1", "Event 1", "Root Motion"]);
+  await drop(page, 2, 1, "not-animation.wav");
+  await drop(page, 2, 2, "not-event.wav");
+  await expect(page.locator(".timeline-editor__waveform")).toHaveCount(0);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(page.locator(".timeline-editor__row-label")).toHaveText(["Audio 1", "Animation 1", "Root Motion"]);
+  await page.getByRole("button", { name: "Redo", exact: true }).click();
+  await menu.selectOption("audio");
+  await expect(page.locator(".timeline-editor__row-label")).toHaveText(["Audio 1", "Animation 1", "Event 1", "Audio 2", "Root Motion"]);
+  await drop(page, 2, 3, "accepted.wav");
+  await expect(page.getByRole("button", { name: "Clip accepted.wav" })).toHaveAttribute("data-start", "2");
+  await page.screenshot({ path: test.info().outputPath("track-types.png") });
+});
+
+test("motion clips select, move, change Animation tracks and drive preview timing", async ({ page }) => {
+  await page.goto("/");
+  const clip = page.getByRole("button", { name: "Clip Animation", exact: true });
+  await clip.click({ position: { x: 25, y: 20 } });
+  await expect(clip).toHaveAttribute("aria-pressed", "true");
+  const width = await page.locator(".timeline-editor__content").evaluate(el => el.getBoundingClientRect().width);
+  const box = (await clip.boundingBox())!;
+  await page.mouse.move(box.x + 25, box.y + 20); await page.mouse.down();
+  await page.mouse.move(box.x + 25 + width / 12 * 2, box.y + 20, { steps: 5 }); await page.mouse.up();
+  await expect(clip).toHaveAttribute("data-start", "2");
+  const ruler = (await page.locator(".timeline-editor__ruler").boundingBox())!;
+  await page.mouse.click(ruler.x + width / 12 * 3, ruler.y + 3);
+  await expect.poll(async () => Number(await page.getByLabel("Animation preview").getAttribute("data-motion-time"))).toBe(1);
+  await page.getByRole("combobox", { name: "Add track" }).selectOption("animation");
+  const destination = (await page.locator(".timeline-editor__row").filter({ hasText: "Animation 1" }).boundingBox())!;
+  const moved = (await clip.boundingBox())!;
+  await page.mouse.move(moved.x + 25, moved.y + 20); await page.mouse.down();
+  await page.mouse.move(moved.x + 25, destination.y + 20, { steps: 5 }); await page.mouse.up();
+  await expect(clip).toHaveAttribute("data-row-id", "animation-track-2");
+  const viewport = page.getByRole("application", { name: "Timeline scrubber" });
+  await viewport.press("Control+ArrowRight");
+  await expect.poll(async () => Number(await clip.getAttribute("data-start"))).toBeCloseTo(2 + 1 / 24);
+  await viewport.press("Control+z");
+  await expect(clip).toHaveAttribute("data-start", "2");
+  await clip.click({ position: { x: 25, y: 20 } }); await viewport.press("Delete");
+  await expect(clip).toHaveCount(0);
+  await viewport.press("Control+z"); await expect(clip).toHaveAttribute("data-start", "2");
 });
 
 test("Sequencer transport shortcuts work without creating editing side effects", async ({ page }) => {

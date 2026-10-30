@@ -66,7 +66,10 @@ Run `npm run build` then `npm run dev`. The standalone demo has a Canvas
 animation preview above the Timeline. Drop audio onto **Audio 1** at the desired
 pointer time: the insertion line shows the target track and time before release.
 Use **＋** in the TRACKS heading, then choose **Audio Track**, for another track.
-The menu lists currently supported track creation types (Audio Track). Every successful drop adds clips; existing
+The menu creates Audio, Animation or Event tracks. New Animation and Event tracks start empty. The preview motion clip supports
+selection, dragging between Animation tracks, frame nudging, deletion and undo/redo;
+its edited start drives the Canvas animation. Animation asset import and event
+authoring/execution are not implemented. Only Audio tracks accept audio drops. Every successful drop adds clips; existing
 clips are retained on decode failure. Multiple/overlapping clips mix during playback.
 File formats depend on the browser decoder, not the extension.
 

@@ -6,6 +6,8 @@ export interface TimelineEditing {
   selectedClipId: ClipId | null;
   canEditClip(clip: TimelineClip): boolean;
   canDropFiles(rowId: RowId): boolean;
+  /** Defaults to the original row; file-drop eligibility is independent. */
+  canMoveClip?(clip: TimelineClip, rowId: RowId): boolean;
   onSelectClip(id: ClipId | null): void;
   onMoveClip(id: ClipId, rowId: RowId, start: number): void;
   onDropFiles(files: readonly File[], rowId: RowId, time: number): void;
@@ -99,11 +101,11 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
         path.push(`M${px},${24 - height}v${height * 2}`);
       }
     }
-    return <div key={clip.id} role="button" tabIndex={0} aria-label={`Audio clip ${clip.label}`} aria-pressed={editing.selectedClipId === clip.id}
+    return <div key={clip.id} role="button" tabIndex={0} aria-label={`Clip ${clip.label}`} aria-pressed={editing.selectedClipId === clip.id}
       data-clip-id={clip.id} data-start={start} data-row-id={moving?.rowId ?? clip.rowId}
       className={`timeline-editor__editable-clip${editing.selectedClipId === clip.id ? " is-selected" : ""}`}
       title={`${clip.label} · ${start.toFixed(2)} s — ${(start + duration).toFixed(2)} s`}
-      style={{ left, top: index * rowHeight + 2, width: visibleWidth, height: rowHeight - 4 }}
+      style={{ left, top: index * rowHeight + 2, width: visibleWidth, height: rowHeight - 4, backgroundColor: clip.color }}
       onKeyDown={(event) => { if (event.key === "Enter") { editing.onSelectClip(clip.id); event.preventDefault(); } }}
       onPointerDown={(event) => {
         if (event.button !== 0) return;
@@ -117,7 +119,7 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
         const raw = timeAt(event.clientX, true) - current.offset;
         const next = Math.max(range.start, Math.min(latestStart, snap && !event.altKey ? Math.round(raw * fps) / fps : raw));
         const row = rowAt(event.clientY);
-        set({ rowId: row && editing.canDropFiles(row.id) ? row.id : current.rowId, start: next, label: `${next.toFixed(2)} s` });
+        set({ rowId: row && (editing.canMoveClip?.(clip, row.id) ?? row.id === clip.rowId) ? row.id : current.rowId, start: next, label: `${next.toFixed(2)} s` });
       }}
       onPointerUp={(event) => {
         if (drag.current?.pointer !== event.pointerId) return;

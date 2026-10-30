@@ -10,5 +10,8 @@ body { background: #101216; color: #d6d6dc; font: 13px Inter, "Segoe UI", sans-s
 .example-error button { margin-left: 12px; color: inherit; background: transparent; border: 0; cursor: pointer; }
 .example-editor .timeline-editor__row-binding { display: none; }
 
-.example-add-track { width: 2.25rem; height: 1.25rem; padding: 0; border: 0; border-radius: 3px; color: #d6d6dc; background: #252932; cursor: pointer; font-size: 12px; }
+.example-add-track { appearance: none; -webkit-appearance: none; width: 1.25rem; height: 1.25rem; padding: 0; text-align: center; text-align-last: center; border: 0; border-radius: 3px; color: #d6d6dc; background: transparent; cursor: pointer; font-size: 16px; }
 .example-add-track option { background: #252932; color: #d6d6dc; }
+
+.example-add-track:hover { background: #303641; }
+.example-add-track:focus-visible { outline: 1px solid #85a9df; outline-offset: 1px; }
