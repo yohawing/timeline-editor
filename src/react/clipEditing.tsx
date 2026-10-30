@@ -19,11 +19,12 @@ export interface TimelineEditing {
   onRedo(): void;
 }
 
-export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight, range, fps, snap, scrollLeft, width }: {
+export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight, range, fps, displayMode = "frames", snap, scrollLeft, width }: {
   editing?: TimelineEditing; dataSource: TimelineDataSource;
   viewport: RefObject<HTMLDivElement | null>; scale: number; rowHeight: number;
-  range: TimeRange; fps: number; snap: boolean; scrollLeft: number; width: number;
+  range: TimeRange; fps: number; displayMode?: "frames" | "seconds"; snap: boolean; scrollLeft: number; width: number;
 }) {
+  const formatTime = (time: number) => displayMode === "frames" ? `${Math.round(time * fps)} f` : `${time.toFixed(2)} s`;
   const [preview, setPreview] = useState<{ rowId: RowId; start: number; end?: number; label: string } | null>(null);
   const drag = useRef<{ id: ClipId; rowId: RowId; start: number; offset: number; mode: "move" | "start" | "end"; pointer: number; element: HTMLElement } | null>(null);
   const previewRef = useRef(preview);
@@ -64,7 +65,7 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
   };
   const dropTarget = (event: DragEvent) => {
     const row = rowAt(event.clientY);
-    return row && editing?.canDropFiles(row.id) ? { rowId: row.id, start: timeAt(event.clientX, event.altKey), label: `${row.label} · ${timeAt(event.clientX, event.altKey).toFixed(2)} s` } : null;
+    return row && editing?.canDropFiles(row.id) ? { rowId: row.id, start: timeAt(event.clientX, event.altKey), label: `${row.label} · ${formatTime(timeAt(event.clientX, event.altKey))}` } : null;
   };
   const handlers = {
     onDragOver: (event: DragEvent<HTMLDivElement>) => {
@@ -112,7 +113,7 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
     return <div key={clip.id} role="button" tabIndex={0} aria-label={`Clip ${clip.label}`} aria-pressed={editing.selectedClipId === clip.id}
       data-clip-id={clip.id} data-start={start} data-end={start + duration} data-row-id={moving?.rowId ?? clip.rowId}
       className={`timeline-editor__editable-clip${editing.selectedClipId === clip.id ? " is-selected" : ""}`}
-      title={`${clip.label} · ${start.toFixed(2)} s — ${(start + duration).toFixed(2)} s`}
+      title={`${clip.label} · ${formatTime(start)} — ${formatTime(start + duration)}`}
       style={{ left, top: index * rowHeight + 2, width: visibleWidth, height: rowHeight - 4, backgroundColor: clip.color }}
       onDoubleClick={event => { event.stopPropagation(); editing.onSelectClip(clip.id); editing.onOpenClipProperties?.(clip.id); }}
       onKeyDown={(event) => { if (event.key === "Enter") { editing.onSelectClip(clip.id); event.preventDefault(); } }}
@@ -133,13 +134,13 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
           const maxEnd = clip.sourceDuration !== undefined && !clip.loop ? clip.range.start + clip.sourceDuration - (clip.sourceOffset ?? 0) : range.end;
           const start = current.mode === "start" ? Math.max(minStart, Math.min(clip.range.end - 1 / fps, edge)) : clip.range.start;
           const end = current.mode === "end" ? Math.max(start + 1 / fps, Math.min(maxEnd, edge)) : clip.range.end;
-          set({ rowId: clip.rowId, start, end, label: `${start.toFixed(2)} — ${end.toFixed(2)} s` });
+          set({ rowId: clip.rowId, start, end, label: `${formatTime(start)} — ${formatTime(end)}` });
           return;
         }
         const raw = timeAt(event.clientX, true) - current.offset;
         const next = Math.max(range.start, Math.min(latestStart, snap && !event.altKey ? Math.round(raw * fps) / fps : raw));
         const row = rowAt(event.clientY);
-        set({ rowId: row && (editing.canMoveClip?.(clip, row.id) ?? row.id === clip.rowId) ? row.id : current.rowId, start: next, label: `${next.toFixed(2)} s` });
+        set({ rowId: row && (editing.canMoveClip?.(clip, row.id) ?? row.id === clip.rowId) ? row.id : current.rowId, start: next, label: `${formatTime(next)}` });
       }}
       onPointerUp={(event) => {
         if (drag.current?.pointer !== event.pointerId) return;

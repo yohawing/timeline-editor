@@ -1,6 +1,6 @@
-import { StrictMode, useEffect, useMemo, type JSX } from "react";
+import { StrictMode, useEffect, useMemo, useState, useCallback, type JSX } from "react";
 import { createRoot } from "react-dom/client";
-import { TimelineEditor } from "@yohawing/timeline-editor";
+import { TimelineEditor, type TimelineViewState } from "@yohawing/timeline-editor";
 import {
   createFixtureTimelineDataSource,
   createLocalPlaybackController,
@@ -48,7 +48,13 @@ function Example(): JSX.Element {
   const params = new URLSearchParams(window.location.search);
   const stress = params.get("stress") === "1";
   const variant = params.get("variant") === "compact" ? "compact" : "full";
-  const fps = Number(params.get("fps") ?? 24);
+  const requestedFps = Number(params.get("fps") ?? 24);
+  const fps = Number.isFinite(requestedFps) && requestedFps > 0 ? requestedFps : 24;
+  const [displayMode, setDisplayMode] = useState<"frames" | "seconds">(preferences.initial.timeline?.displayMode === "seconds" ? "seconds" : "frames");
+  const onViewStateChange = useCallback((state: TimelineViewState) => {
+    setDisplayMode(state.displayMode);
+    preferences.saveTimeline(state);
+  }, [preferences.saveTimeline]);
   const malformed = params.get("malformed") === "1";
   const reject = params.get("reject") === "1";
   const dataSource = useMemo(() => stress ? createStressTimelineDataSource() : createPreviewTimeline(), [stress]);
@@ -63,7 +69,7 @@ function Example(): JSX.Element {
     } satisfies TimelinePlaybackController;
   }, [malformed, reject]);
   const motion = useMemo(() => stress ? null : dataSource.getItems({ rowIds: dataSource.getRows({ start: 0, count: dataSource.getRowCount() }).map(row => row.id), range: dataSource.getRange() }).find((item): item is TimelineClip => item.kind === "clip" && item.id === "preview-animation") ?? null, [dataSource, stress]);
-  const audio = useAudioDemo(playbackController, motion);
+  const audio = useAudioDemo(playbackController, motion, { displayMode, fps });
   useEffect(() => { if (audio.ready) document.querySelector<HTMLElement>(".timeline-editor__viewport")?.focus({ preventScroll: true }); }, [audio.ready]);
   const audioData = useMemo(() => withAudioRows(dataSource, audio.document, audio.collapsed), [dataSource, audio.document, audio.collapsed]);
   return (
@@ -77,13 +83,13 @@ function Example(): JSX.Element {
           dataSource={audioData}
           editing={audio.editing}
           initialViewState={preferences.initial.timeline}
-          onViewStateChange={preferences.saveTimeline}
+          onViewStateChange={onViewStateChange}
           onRenameRow={stress ? undefined : audio.renameRow}
           onMoveRow={stress ? undefined : audio.moveRow}
           onToggleRow={stress ? undefined : audio.toggleRow}
           showTitle={false}
           playbackController={audio.controller}
-          frameRate={Number.isFinite(fps) && fps > 0 ? fps : 24}
+          frameRate={fps}
           variant={variant}
           slots={{ toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack, rowActions: audio.rowActions, rowIcon: audio.rowIcon }}
           onDiagnostic={(diagnostic) => console.warn(diagnostic.message, diagnostic.error)}

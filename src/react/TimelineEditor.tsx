@@ -633,7 +633,7 @@ export function TimelineEditor({
     }
     return targets;
   }, [dataSource, revision, rows]);
-  const clipEditing = useClipEditing({ editing, dataSource, viewport: timelineViewportRef, scale: pixelsPerSecond, rowHeight, range, fps, snap, scrollLeft: scroll.left, width: viewport.width });
+  const clipEditing = useClipEditing({ editing, dataSource, viewport: timelineViewportRef, scale: pixelsPerSecond, rowHeight, range, fps, displayMode, snap, scrollLeft: scroll.left, width: viewport.width });
   const editableClips = editing ? dataSource.getItems(visibleQuery).filter(item => item.kind === "clip" && editing.canEditClip(item)) : [];
   const commandTarget = resolveTimelinePlaybackTarget(selectedTarget, playbackSnapshot);
   const loopRange = canTransport ? (playbackSnapshot.loopRange ?? null) : localLoopRange;

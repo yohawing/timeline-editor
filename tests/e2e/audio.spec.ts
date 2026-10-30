@@ -71,7 +71,7 @@ test("drop preview and placement use zoomed and scrolled track coordinates", asy
     el.dispatchEvent(new Event("scroll"));
   });
   await drop(page, 5, 1, "placed.wav", false, true);
-  await expect(page.locator(".timeline-editor__drop-preview")).toContainText("Audio 2 · 5.00 s");
+  await expect(page.locator(".timeline-editor__drop-preview")).toContainText("Audio 2 · 120 f");
   await drop(page, 5, 1, "placed.wav");
   await expect(page.locator(".timeline-editor__drop-preview")).toHaveCount(0);
   const clip = page.getByRole("button", { name: "Clip placed.wav" });
@@ -442,7 +442,9 @@ test("trims source time, loops audio, and saves an independent playback range", 
     (window as any).started = [];
     AudioBufferSourceNode.prototype.start = function (...args) { (window as any).started.push({ loop: this.loop, offset: args[1], duration: args[2] }); start.apply(this, args); };
   });
-  await page.goto("/"); await drop(page, 0, 0, "trim.wav");
+  await page.goto("/");
+  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await drop(page, 0, 0, "trim.wav");
   const clip = page.getByRole("button", { name: "Clip trim.wav", exact: true });
   await expect(clip).toBeVisible();
   const box = (await clip.boundingBox())!;

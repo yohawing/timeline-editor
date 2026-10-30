@@ -197,7 +197,10 @@ same source mapping; moving the clip preserves its offset. Turning Loop off
 limits the section to the remaining source. Clip looping is independent of the
 transport Loop button. Both trim and inspector edits support undo and persistence.
 
-The demo In/Out fields edit an independent playback range in seconds. The local
+The demo In/Out fields edit an independent playback range in the selected display
+unit. Frames mode uses whole-frame inputs at the current FPS; seconds mode uses
+seconds. Clip Start/End, duration, source offset and drag/drop/trim feedback follow
+the same mode. Display switching never converts or rounds stored canonical seconds. The local
 controller accepts `setPlaybackRange`; other host controllers may handle this
 optional command when exposing their own range UI. Timeline view bounds include
 clips and the playback range, while playback stops/loops at the configured bounds.

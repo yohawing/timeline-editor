@@ -70,7 +70,9 @@ export function withAudioRows(base: TimelineDataSource, document: Document, coll
   };
 }
 
-export function useAudioDemo(controller: TimelinePlaybackController, motion: TimelineClip | null) {
+export function useAudioDemo(controller: TimelinePlaybackController, motion: TimelineClip | null, timeDisplay: { displayMode: "frames" | "seconds"; fps: number }) {
+  const timeDisplayRef = useRef(timeDisplay); timeDisplayRef.current = timeDisplay;
+  const formatTime = (seconds: number) => timeDisplay.displayMode === "frames" ? `${Math.round(seconds * timeDisplay.fps)} f` : `${seconds.toFixed(3)} s`;
   const [document, setDocument] = useState<Document>({ tracks: [firstTrack, ...(motion ? [{ id: motion.rowId, type: "animation" as const, external: true }] : [])], clips: motion ? [{ ...motion, sourceDuration: 12 }] : [] });
   const [collapsed, setCollapsed] = useState<string[]>(() => {
     try { const value = JSON.parse(localStorage.getItem("timeline-editor.demo.groups.ui.v1") ?? "[]"); return Array.isArray(value) ? value.filter(item => typeof item === "string") : []; } catch { return []; }
@@ -262,7 +264,7 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
         context.fillStyle = phase < 0.08 ? "#ffd783" : "#72bfc8";
         if (motionClip) { context.beginPath(); context.arc(x, y, 23, 0, Math.PI * 2); context.fill(); }
         context.fillStyle = "#8d98aa"; context.font = "12px Consolas, monospace";
-        context.fillText(`${value.time.toFixed(2)} s`, 18, 26);
+        context.fillText(timeDisplayRef.current.displayMode === "frames" ? `${Math.round(value.time * timeDisplayRef.current.fps)} f` : `${value.time.toFixed(2)} s`, 18, 26);
         canvas.dataset.time = value.time.toFixed(3);
       }
       frame = requestAnimationFrame(tick);
@@ -337,10 +339,10 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
   const properties = inspected && <aside className="example-properties" aria-label="Clip properties">
     <header><strong>Properties</strong><button aria-label="Close properties" title="Close" onClick={() => setInspectorId(null)}>×</button></header>
     <div className="example-property-name" title={inspected.label}>{inspected.label}</div>
-    <dl><dt>Start</dt><dd><TimeField label="Clip start" value={inspected.range.start} onCommit={start => resizeClip(inspected.id, { ...inspected.range, start })} /></dd>
-      <dt>End</dt><dd><TimeField label="Clip end" value={inspected.range.end} onCommit={end => resizeClip(inspected.id, { ...inspected.range, end })} /></dd>
-      <dt>Duration</dt><dd>{(inspected.range.end - inspected.range.start).toFixed(3)} s</dd>
-      <dt>Source offset</dt><dd>{(inspected.sourceOffset ?? 0).toFixed(3)} s</dd></dl>
+    <dl><dt>Start</dt><dd><TimeField {...timeDisplay} label="Clip start" value={inspected.range.start} onCommit={start => resizeClip(inspected.id, { ...inspected.range, start })} /></dd>
+      <dt>End</dt><dd><TimeField {...timeDisplay} label="Clip end" value={inspected.range.end} onCommit={end => resizeClip(inspected.id, { ...inspected.range, end })} /></dd>
+      <dt>Duration</dt><dd>{formatTime(inspected.range.end - inspected.range.start)}</dd>
+      <dt>Source offset</dt><dd>{formatTime(inspected.sourceOffset ?? 0)}</dd></dl>
     <div className="example-property-toggles">
       {typeOf(inspected) !== "event" && <label><input type="checkbox" checked={inspected.loop ?? false} onChange={event => updateProperties(inspected.id, { loop: event.target.checked })} />Loop</label>}
       <label><input type="checkbox" checked={inspected.disabled ?? false} onChange={event => updateProperties(inspected.id, { disabled: event.target.checked })} />Disable</label>
@@ -411,8 +413,8 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     <span className="example-save-state" role="status" aria-label={`${projectName}: ${saveStatus}`} title={`${projectName} · ${saveStatus}`}>{projectName}{!ready || storageError || saving ? "*" : ""}</span>
     <button className="timeline-editor__button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.current.length} onClick={undo}>↶</button>
     <button className="timeline-editor__button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!future.current.length} onClick={redo}>↷</button>
-    <label className="example-range-field">In <TimeField label="Playback start" value={playbackRange.start} onCommit={start => changePlaybackRange({ ...playbackRange, start })} /></label>
-    <label className="example-range-field">Out <TimeField label="Playback end" value={playbackRange.end} onCommit={end => changePlaybackRange({ ...playbackRange, end })} /></label>
+    <label className="example-range-field">In ({timeDisplay.displayMode === "frames" ? "f" : "s"}) <TimeField {...timeDisplay} label="Playback start" value={playbackRange.start} onCommit={start => changePlaybackRange({ ...playbackRange, start })} /></label>
+    <label className="example-range-field">Out ({timeDisplay.displayMode === "frames" ? "f" : "s"}) <TimeField {...timeDisplay} label="Playback end" value={playbackRange.end} onCommit={end => changePlaybackRange({ ...playbackRange, end })} /></label>
   </>;
   const renameRow = (id: RowId, label: string) => commit({ ...current.current, tracks: current.current.tracks.map(track => track.id === id ? { ...track, label } : track) });
   return { document, collapsed, toggleRow, moveRow, ready, saving, toolbar, addTrack, rowIcon, rowActions, renameRow, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
