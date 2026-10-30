@@ -35,7 +35,7 @@ const trackTypes = {
 } as const;
 type TrackType = keyof typeof trackTypes;
 interface Track { parentId?: RowId; id: RowId; type: TrackType; label?: string; external?: boolean; muted?: boolean; solo?: boolean }
-interface DemoClip extends TimelineClip { disabled?: boolean; volume?: number }
+interface DemoClip extends TimelineClip { volume?: number }
 export interface Document { playbackRange?: TimeRange; tracks: readonly Track[]; clips: readonly DemoClip[] }
 const firstTrack: Track = { id: timelineId<"row">("audio-track-1"), type: "audio" };
 const isAudioTrack = (document: Document, id: RowId) => document.tracks.some(track => track.id === id && track.type === "audio");
@@ -408,7 +408,7 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     return track ? <span title={`${trackTypes[track.type].label} Track`}><TrackIcon type={track.type} /></span> : null;
   };
   const playbackRange = document.playbackRange ?? { start: 0, end: 12 };
-  const changePlaybackRange = (range: TimeRange) => { if (range.end > range.start) commit({ ...current.current, playbackRange: range }); };
+  const changePlaybackRange = (range: TimeRange) => { if (range.end > range.start && (range.start !== playbackRange.start || range.end !== playbackRange.end)) commit({ ...current.current, playbackRange: range }); };
   const toolbar = <>
     <span className="example-save-state" role="status" aria-label={`${projectName}: ${saveStatus}`} title={`${projectName} · ${saveStatus}`}>{projectName}{!ready || storageError || saving ? "*" : ""}</span>
     <button className="timeline-editor__button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.current.length} onClick={undo}>↶</button>
@@ -417,5 +417,5 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     <label className="example-range-field">Out ({timeDisplay.displayMode === "frames" ? "f" : "s"}) <TimeField {...timeDisplay} label="Playback end" value={playbackRange.end} onCommit={end => changePlaybackRange({ ...playbackRange, end })} /></label>
   </>;
   const renameRow = (id: RowId, label: string) => commit({ ...current.current, tracks: current.current.tracks.map(track => track.id === id ? { ...track, label } : track) });
-  return { document, collapsed, toggleRow, moveRow, ready, saving, toolbar, addTrack, rowIcon, rowActions, renameRow, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
+  return { document, changePlaybackRange, collapsed, toggleRow, moveRow, ready, saving, toolbar, addTrack, rowIcon, rowActions, renameRow, filePicker, editing, properties, preview, controller: wrapped, error, dismissError: () => setError("") };
 }

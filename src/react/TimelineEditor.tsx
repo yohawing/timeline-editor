@@ -61,6 +61,8 @@ import {
   type TimelinePlaybackTarget,
 } from "../core/playback";
 import "../styles/timeline.css";
+import { PlaybackRangeHandles } from "./PlaybackRangeHandles";
+import { useMiddlePan } from "./useMiddlePan";
 import { RowLabel } from "./RowLabel";
 import { TrackDivider } from "./TrackDivider";
 import { useClipEditing, type TimelineEditing } from "./clipEditing";
@@ -112,6 +114,8 @@ export interface TimelineViewState {
 }
 
 export interface TimelineEditorProps {
+  /** Commit a playback-boundary gesture; the host owns transport, persistence and undo. */
+  onChangePlaybackRange?: (range: TimeRange) => void;
   /** Initial view preferences; persistence remains owned by the host. */
   initialViewState?: Partial<TimelineViewState>;
   onViewStateChange?: (state: TimelineViewState) => void;
@@ -271,6 +275,7 @@ function drawItem(
   rowIndex: number,
   timeToX: (time: number) => number,
   rowHeight: number,
+  visibleRange: TimeRange,
 ): void {
   const rowY = rowIndex * rowHeight;
   // Every pixel constant below was drawn for the 26px design row; scale them
@@ -278,13 +283,15 @@ function drawItem(
   // the clip band and the DOM row strip keep the same proportions.
   const s = rowHeight / TIMELINE_ROW_HEIGHT;
   if (item.kind === "clip") {
+    context.save();
+    const opacity = item.disabled ? 0.4 : 1;
     const x = timeToX(item.range.start);
     const width = Math.max(3, timeToX(item.range.end) - x);
     roundedRect(context, x + 1, rowY + 4 * s, width - 2, 18 * s, 3 * s);
-    context.globalAlpha = 0.82;
+    context.globalAlpha = 0.82 * opacity;
     context.fillStyle = item.color;
     context.fill();
-    context.globalAlpha = 1;
+    context.globalAlpha = opacity;
     context.strokeStyle = item.selected ? "#f1f3ff" : "rgba(255,255,255,.16)";
     context.lineWidth = item.selected ? 1.5 : 1;
     context.stroke();
@@ -296,6 +303,20 @@ function drawItem(
     context.font = `500 ${10 * s}px Inter, Segoe UI, sans-serif`;
     context.textBaseline = "middle";
     context.fillText(item.label, x + 8 * s, rowY + 13 * s);
+    context.restore();
+    const period = item.sourceDuration ?? (item.range.end - item.range.start);
+    if (item.loop && period > 0 && timeToX(period) - timeToX(0) >= 6) {
+      const offset = item.sourceOffset ?? 0;
+      const first = Math.max(1, Math.ceil((offset + Math.max(0, visibleRange.start - item.range.start)) / period));
+      const last = Math.floor((offset + Math.min(item.range.end, visibleRange.end) - item.range.start) / period);
+      context.strokeStyle = "rgba(255,255,255,.75)";
+      for (let cycle = first; cycle <= last; cycle++) {
+        const time = item.range.start + cycle * period - offset;
+        if (time <= item.range.start || time >= item.range.end) continue;
+        const boundary = timeToX(time);
+        context.beginPath(); context.moveTo(boundary, rowY + 4 * s); context.lineTo(boundary, rowY + 22 * s); context.stroke();
+      }
+    }
     context.restore();
     return;
   }
@@ -404,6 +425,7 @@ export function TimelineEditor({
   dataSource,
   editing,
   onRenameRow,
+  onChangePlaybackRange,
   onMoveRow,
   onToggleRow,
   initialViewState,
@@ -459,6 +481,7 @@ export function TimelineEditor({
   );
   const range = useMemo(() => safeRange(dataSource), [dataSource, revision]);
   const duration = Math.max(0, range.end - range.start);
+  const [playbackRangePreview, setPlaybackRangePreview] = useState<TimeRange | null>(null);
   const playbackRange = playbackSnapshot.available ? (playbackSnapshot.range ?? range) : range;
   const [displayMode, setDisplayMode] = useState<"frames" | "seconds">(initialViewState?.displayMode === "seconds" || initialViewState?.displayMode === "frames" ? initialViewState.displayMode : initialDisplayMode);
   const [scroll, setScroll] = useState({ left: 0, top: 0 });
@@ -511,6 +534,7 @@ export function TimelineEditor({
   const loopPointerIdRef = useRef<number | null>(null);
   const loopDragOriginRef = useRef(range.start);
   const timelineViewportRef = useRef<HTMLDivElement>(null);
+  const panHandlers = useMiddlePan(timelineViewportRef);
   const treeViewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const playheadRef = useRef<HTMLDivElement>(null);
@@ -1037,7 +1061,7 @@ export function TimelineEditor({
     for (const item of items) {
       const rowIndex = rowIndexById.get(item.rowId);
       if (item.kind === "clip" && editing?.canEditClip(item)) continue;
-      if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, item, rowIndex, transform.timeToX, rowHeight);
+      if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, item, rowIndex, transform.timeToX, rowHeight, visibleTimeRange);
     }
     if (columns.length > 0) {
       for (const column of columns) {
@@ -1169,7 +1193,7 @@ export function TimelineEditor({
           span both — the playhead extends up through the ruler, and the
           loop band highlights the same horizontal span in both rows.
         */}
-        <div className="timeline-editor__ruler-and-tracks">
+        <div className="timeline-editor__ruler-and-tracks" {...panHandlers}>
           <div
             className="timeline-editor__ruler"
             ref={rulerRef}
@@ -1179,6 +1203,7 @@ export function TimelineEditor({
             onPointerUp={(event) => finishScrub(event, false)}
             onPointerCancel={(event) => finishScrub(event, true)}
           >
+            {canTransport && onChangePlaybackRange && <PlaybackRangeHandles range={playbackRangePreview ?? playbackRange} viewStart={range.start} scale={pixelsPerSecond} scrollLeft={scroll.left} width={viewport.width} fps={fps} displayMode={displayMode} onPreview={setPlaybackRangePreview} onChange={onChangePlaybackRange} />}
             <span ref={tickWidthProbeRef} className="timeline-editor__tick timeline-editor__tick--measure" aria-hidden="true">00000000</span>
             {ticks.map((tick) => <span className="timeline-editor__tick" key={tick} style={{ left: `${Math.max(tickLabelWidth / 2, Math.min(viewport.width - tickLabelWidth / 2, ((tick - range.start) * pixelsPerSecond) - scroll.left))}px` }}>{formatTimelineTick(tick, displayMode, fps)}</span>)}
             <div
@@ -1210,7 +1235,7 @@ export function TimelineEditor({
             <canvas className="timeline-editor__canvas" ref={canvasRef} />
             {editableClips.map(clip => clip.kind === "clip" ? clipEditing.renderClip(clip, rowQuery.start + rows.findIndex(row => row.id === clip.rowId)) : null)}
             {clipEditing.indicator}
-            {canTransport && [playbackRange.start, playbackRange.end].map((boundary, index) => <div key={index} className={`timeline-editor__playback-boundary timeline-editor__playback-boundary--${index === 0 ? "start" : "end"}`} title={index === 0 ? "Playback start" : "Playback end"} style={{ left: (boundary - range.start) * pixelsPerSecond, height: Math.max(totalHeight, viewport.height) }} />)}
+            {canTransport && [(playbackRangePreview ?? playbackRange).start, (playbackRangePreview ?? playbackRange).end].map((boundary, index) => <div key={index} className={`timeline-editor__playback-boundary timeline-editor__playback-boundary--${index === 0 ? "start" : "end"}`} title={index === 0 ? "Playback start" : "Playback end"} style={{ left: (boundary - range.start) * pixelsPerSecond, height: Math.max(totalHeight, viewport.height) }} />)}
             <div className="timeline-editor__range-action">{slots?.diagnosticAction}</div>
           </div>
           {loopRangeStyle && (

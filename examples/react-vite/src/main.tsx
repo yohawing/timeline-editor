@@ -84,6 +84,7 @@ function Example(): JSX.Element {
           editing={audio.editing}
           initialViewState={preferences.initial.timeline}
           onViewStateChange={onViewStateChange}
+          onChangePlaybackRange={audio.changePlaybackRange}
           onRenameRow={stress ? undefined : audio.renameRow}
           onMoveRow={stress ? undefined : audio.moveRow}
           onToggleRow={stress ? undefined : audio.toggleRow}

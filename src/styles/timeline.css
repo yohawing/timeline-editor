@@ -396,3 +396,10 @@
 
 button.timeline-editor__row-disclosure { background: none; border: 0; padding: 0; cursor: pointer; }
 .timeline-editor__row.is-drop-target { outline: 1px solid var(--timeline-accent); outline-offset: -1px; }
+
+.timeline-editor__playback-handle { position: absolute; top: 0; width: 8px; height: 16px; background: #e47979; z-index: 6; cursor: ew-resize; touch-action: none; border-radius: 0 0 2px 2px; }
+.timeline-editor__playback-handle--start { background: #66c6a1; }
+.timeline-editor__playback-handle:focus-visible { outline: 1px solid #fff; }
+.timeline-editor__ruler-and-tracks.is-panning, .timeline-editor__ruler-and-tracks.is-panning * { cursor: grabbing !important; }
+.timeline-editor__editable-clip.is-disabled { opacity: 0.4; }
+.timeline-editor__clip-loop-boundary { position: absolute; top: 0; bottom: 0; width: 1px; border-left: 1px dashed #ffffffc0; box-shadow: 1px 0 #0005; pointer-events: none; }

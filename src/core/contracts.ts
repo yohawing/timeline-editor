@@ -75,6 +75,8 @@ export interface TimelineClip extends TimelineItemBase {
   color: string;
   /** Media time at the left edge; moving a clip preserves this offset. */
   sourceOffset?: number;
+  /** Host excludes this clip from evaluation; the editor keeps it editable. */
+  disabled?: boolean;
   /** Full source length in seconds (also the cycle length when looping). */
   sourceDuration?: number;
   loop?: boolean;

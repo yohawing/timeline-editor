@@ -211,3 +211,16 @@ and adding child tracks through +. Their disclosure buttons collapse/expand the
 rows without stopping playback. Membership is project data; collapsed group IDs
 are UI preferences in LocalStorage. Hosts opt in with `onMoveRow` and
 `onToggleRow` and provide the visible flattened rows/depth/expanded state.
+
+Playback start/end handles appear in the ruler when the host provides
+`onChangePlaybackRange(range)`. Drag previews the boundaries; release commits once.
+Escape or pointer cancellation restores the original range. Left/Right moves a
+focused handle by one frame; Alt-drag bypasses frame snapping. The demo connects
+this callback to the same undo/persistence path as its In/Out fields.
+
+Middle-button dragging over the ruler or clips pans horizontally and vertically
+without seeking or editing clips. Escape cancels the pan. Looped clips show source
+wrap boundaries, including trimmed source offsets; boundaries closer than 6px are
+omitted at distant zoom levels to avoid dense overlapping lines. Disabled clips
+are translucent but remain selectable and editable. Read-only Canvas clips use
+the same disabled appearance and source-wrap positions.

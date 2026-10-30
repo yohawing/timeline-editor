@@ -110,10 +110,19 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
         path.push(`M${px},${24 - height}v${height * 2}`);
       }
     }
+    const loopLines: number[] = [];
+    if (clip.loop && sourceDuration > 0 && sourceDuration * scale >= 6) {
+      const first = Math.max(1, Math.ceil((sourceOffset + (left - x) / scale) / sourceDuration));
+      const last = Math.floor((sourceOffset + (right - x) / scale) / sourceDuration);
+      for (let cycle = first; cycle <= last; cycle++) {
+        const offset = cycle * sourceDuration - sourceOffset;
+        if (offset > 0 && offset < duration) loopLines.push(x + offset * scale - left);
+      }
+    }
     return <div key={clip.id} role="button" tabIndex={0} aria-label={`Clip ${clip.label}`} aria-pressed={editing.selectedClipId === clip.id}
       data-clip-id={clip.id} data-start={start} data-end={start + duration} data-row-id={moving?.rowId ?? clip.rowId}
-      className={`timeline-editor__editable-clip${editing.selectedClipId === clip.id ? " is-selected" : ""}`}
-      title={`${clip.label} · ${formatTime(start)} — ${formatTime(start + duration)}`}
+      className={`timeline-editor__editable-clip${clip.disabled ? " is-disabled" : ""}${editing.selectedClipId === clip.id ? " is-selected" : ""}`}
+      title={`${clip.label}${clip.disabled ? " (Disabled)" : ""} · ${formatTime(start)} — ${formatTime(start + duration)}`}
       style={{ left, top: index * rowHeight + 2, width: visibleWidth, height: rowHeight - 4, backgroundColor: clip.color }}
       onDoubleClick={event => { event.stopPropagation(); editing.onSelectClip(clip.id); editing.onOpenClipProperties?.(clip.id); }}
       onKeyDown={(event) => { if (event.key === "Enter") { editing.onSelectClip(clip.id); event.preventDefault(); } }}
@@ -152,6 +161,7 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
         cancel();
       }} onPointerCancel={cancel} onLostPointerCapture={() => { if (drag.current) cancel(); }}>
       <span>{clip.label}{clip.loop ? " ↻" : ""}</span>
+      {loopLines.map(left => <i key={left} aria-hidden="true" className="timeline-editor__clip-loop-boundary" style={{ left }} />)}
       {editing.onResizeClip && left === x && <i className="timeline-editor__trim timeline-editor__trim--start" data-trim-edge="start" title="Trim clip start" />}
       {editing.onResizeClip && right === x + duration * scale && <i className="timeline-editor__trim timeline-editor__trim--end" data-trim-edge="end" title="Trim clip end" />}
       {peaks && <svg className="timeline-editor__waveform" aria-label="Audio waveform" viewBox={`0 0 ${visibleWidth} 40`} preserveAspectRatio="none"><path d={path.join("")} /></svg>}
