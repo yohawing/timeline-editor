@@ -17,7 +17,7 @@ test("supports compact variant, FPS formatting and display switch", async ({ pag
   const readout = page.getByRole("button", { name: "Current time" });
   await expect(readout).toContainText("f");
   await page.getByLabel("Timeline settings").click();
-  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await page.getByLabel("Time display", { exact: true }).selectOption((await page.getByLabel("Time display", { exact: true }).inputValue()) === "frames" ? "seconds" : "frames");
   await page.getByLabel("Timeline settings").click();
   await expect(readout).toContainText("s");
 });

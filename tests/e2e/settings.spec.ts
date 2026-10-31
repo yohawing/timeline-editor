@@ -40,7 +40,8 @@ test("settings keyboard interaction stays isolated and the panel fits a short ed
   const panelBox = (await panel.boundingBox())!;
   const editorBox = (await page.getByRole("region", { name: "Timeline editor" }).boundingBox())!;
   expect(panelBox.y + panelBox.height).toBeLessThanOrEqual(editorBox.y + editorBox.height);
-  await page.getByLabel("Playback speed").selectOption("2");
+  await page.getByLabel("Playback speed").press("Home");
+  for (let i = 0; i < 38; i++) await page.getByLabel("Playback speed").press("ArrowRight");
   await page.getByLabel("Playback speed").press("Escape");
   await expect(panel).not.toBeVisible();
   await settings.click();
@@ -56,14 +57,16 @@ test("numeric time, range and FPS settings drive the host preview", async ({ pag
   await page.getByRole("spinbutton", { name: "Current frame", exact: true }).press("Enter");
   await expect(page.getByLabel("Animation preview")).toHaveAttribute("data-time", "2.500");
   await page.getByLabel("Timeline settings").click();
-  await page.getByLabel("Frame rate", { exact: true }).selectOption("60");
+  await page.getByLabel("Frame rate", { exact: true }).fill("60");
+  await page.getByLabel("Frame rate", { exact: true }).press("Enter");
   await expect(readout).toContainText("0150");
   const start = page.getByLabel("Playback start time");
   await start.fill("60"); await start.press("Enter");
   await expect(page.getByRole("slider", { name: "Playback range start", exact: true })).toHaveAttribute("aria-valuenow", "1");
-  await page.getByLabel("Playback speed").selectOption("0.5");
+  await page.getByLabel("Playback speed").press("Home");
+  for (let i = 0; i < 8; i++) await page.getByLabel("Playback speed").press("ArrowRight");
   await expect(page.getByRole("button", { name: "Playback rate", exact: true })).toHaveText("0.5x");
-  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await page.getByLabel("Time display", { exact: true }).selectOption((await page.getByLabel("Time display", { exact: true }).inputValue()) === "frames" ? "seconds" : "frames");
   await page.getByLabel("Timeline settings").click();
   await readout.dblclick();
   const seconds = page.getByRole("spinbutton", { name: "Current seconds", exact: true });
@@ -76,7 +79,7 @@ test("keyboard presets change shortcuts and survive reload", async ({ page }) =>
   const viewport = page.getByRole("application", { name: "Timeline scrubber" });
   for (const [preset, next] of [["unity", "."], ["maya", "Alt+."]] as const) {
     await page.getByLabel("Timeline settings").click();
-    await page.getByLabel("Keyboard preset").selectOption(preset);
+    await page.getByLabel("Operation preset").selectOption(preset);
     await page.getByLabel("Timeline settings").click();
     await page.getByRole("button", { name: "Skip to start", exact: true }).click();
     await viewport.press(next);
@@ -84,11 +87,59 @@ test("keyboard presets change shortcuts and survive reload", async ({ page }) =>
   }
   await page.reload();
   await page.getByLabel("Timeline settings").click();
-  await expect(page.getByLabel("Keyboard preset")).toHaveValue("maya");
-  await page.getByLabel("Keyboard preset").selectOption("logic");
+  await expect(page.getByLabel("Operation preset")).toHaveValue("maya");
+  await page.getByLabel("Operation preset").selectOption("logic");
   await page.getByLabel("Timeline settings").click();
   await viewport.press("c");
   await expect(page.getByRole("button", { name: "Loop", exact: true })).toHaveClass(/is-active/);
   await viewport.press("Enter");
   await expect(page.getByRole("button", { name: "Current time" })).toContainText("0000");
+});
+
+for (const preset of ["ue", "unity", "maya", "logic"] as const) test(`${preset} navigation preset applies wheel and pan gestures`, async ({ page }) => {
+  await page.goto("/?stress=1");
+  await page.getByLabel("Timeline settings").click();
+  await page.getByLabel("Operation preset").selectOption(preset);
+  await page.getByLabel("Timeline settings").click();
+  const viewport = page.locator(".timeline-editor__viewport");
+  const content = page.locator(".timeline-editor__content");
+  const width = () => content.evaluate(el => el.getBoundingClientRect().width);
+  const before = await width();
+  const box = (await viewport.boundingBox())!;
+  await page.mouse.move(box.x + 200, box.y + 80);
+  if (preset === "logic") {
+    await page.mouse.wheel(0, 180);
+    await expect.poll(() => viewport.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+    expect(await width()).toBe(before);
+    await page.keyboard.down("Alt"); await page.keyboard.down("Control");
+  }
+  await page.mouse.wheel(0, -600);
+  if (preset === "logic") { await page.keyboard.up("Control"); await page.keyboard.up("Alt"); }
+  await expect.poll(width).toBeGreaterThan(before);
+  await viewport.evaluate(el => { el.scrollLeft = 0; el.scrollTop = 0; });
+  const readout = await page.getByRole("button", { name: "Current time" }).textContent();
+  if (preset === "maya" || preset === "unity") await page.keyboard.down("Alt");
+  const button = preset === "unity" ? "left" : "middle";
+  await page.mouse.move(box.x + 220, box.y + 80); await page.mouse.down({ button });
+  await page.mouse.move(box.x + 120, box.y + 80, { steps: 4 }); await page.mouse.up({ button });
+  if (preset === "maya" || preset === "unity") await page.keyboard.up("Alt");
+  await expect.poll(() => viewport.evaluate(el => el.scrollLeft)).toBeCloseTo(100, 0);
+  await expect(page.getByRole("button", { name: "Current time" })).toHaveText(readout!);
+});
+
+test("loop UI hides while off and restores its existing interval", async ({ page }) => {
+  await page.goto("/");
+  const lane = page.getByLabel("Loop range", { exact: true });
+  const band = page.locator(".timeline-editor__loop-region");
+  await expect(lane).toHaveCount(0);
+  await page.getByRole("button", { name: "Loop", exact: true }).click();
+  const box = (await lane.boundingBox())!;
+  await page.mouse.move(box.x + 60, box.y + 2); await page.mouse.down();
+  await page.mouse.move(box.x + 180, box.y + 2, { steps: 4 }); await page.mouse.up();
+  await expect(band).toBeVisible();
+  const style = await band.getAttribute("style");
+  await page.getByRole("button", { name: "Loop", exact: true }).click();
+  await expect(lane).toHaveCount(0); await expect(band).toHaveCount(0);
+  await page.getByRole("button", { name: "Loop", exact: true }).click();
+  await expect(band).toHaveAttribute("style", style!);
 });

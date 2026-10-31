@@ -23,7 +23,7 @@ export function PlaybackRangeHandles({ range, viewStart, scale, scrollLeft, widt
     const label = `Playback range ${edge}`;
     const value = displayMode === "frames" ? `${Math.round(range[edge] * fps)} f` : `${range[edge].toFixed(2)} s`;
     return <div key={edge} role="slider" tabIndex={0} aria-label={label} aria-orientation="horizontal" aria-valuenow={range[edge]}
-      aria-valuetext={value} title={`${label}: ${value} · Drag or Left/Right · Alt bypasses snapping`}
+      aria-valuetext={value} title={`${label}: ${value} · Drag or Left/Right · Hold Alt during drag to bypass snapping`}
       className={`timeline-editor__playback-handle timeline-editor__playback-handle--${edge}`}
       style={{ left: Math.max(3, Math.min(width - 9, x - (edge === "end" ? 8 : 0))) }}
       onPointerDown={event => {

@@ -16,7 +16,7 @@ for (const width of [320,1000]) test(`negative range transport and view ${width}
   await page.mouse.wheel(0,-500);
   await expect.poll(() => page.locator(".timeline-editor__range-thumb").evaluate(el => el.getBoundingClientRect().width)).toBeLessThan(ruler!.width);
   await page.getByLabel("Timeline settings").click();
-  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await page.getByLabel("Time display", { exact: true }).selectOption((await page.getByLabel("Time display", { exact: true }).inputValue()) === "frames" ? "seconds" : "frames");
   await page.getByLabel("Timeline settings").click();
   await expect(readout).toContainText("-2.00 / 3.00 s");
 });

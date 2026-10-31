@@ -446,7 +446,7 @@ test("trims source time, loops audio, and saves an independent playback range", 
   });
   await page.goto("/");
   await page.getByLabel("Timeline settings").click();
-  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await page.getByLabel("Time display", { exact: true }).selectOption((await page.getByLabel("Time display", { exact: true }).inputValue()) === "frames" ? "seconds" : "frames");
   await page.getByLabel("Timeline settings").click();
   await drop(page, 0, 0, "trim.wav");
   const clip = page.getByRole("button", { name: "Clip trim.wav", exact: true });

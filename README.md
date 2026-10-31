@@ -308,15 +308,15 @@ Hosts can set `allowViewOutsideRange={false}` to bound time-axis zoom and pan to
 
 Open the gear button for frame/second display, FPS, playback start/end, and playback speed. FPS choices and range edits use the existing host callbacks (`onFrameRateChange`, `onChangePlaybackRange`); unavailable controls stay disabled. Range input commits with Enter, snaps to a frame, and preserves at least one frame between start and end.
 
-`slots.settings` accepts host-owned settings content; the demo places Dark/Light selection here. The toolbar defaults to 36px with 28px controls, and scrollable panels share compact scrollbars. Settings and Snap use Google Material Symbols, consistent with the transport controls.
+`slots.settings` accepts host-owned settings content; the demo places Dark/Light selection here. The toolbar defaults to 36px with 28px controls, and scrollable panels share compact scrollbars. Settings uses Google Material Symbols; Snap uses the Lucide outline magnet (ISC, notice included in LICENSE).
 
 The Snap icon highlights when enabled. It controls pointer scrubbing, clip/event edits, playback-range handles and loop-range dragging; Alt temporarily bypasses snapping. Explicit frame-step and numeric-navigation commands retain frame snapping. `proposeTimelineItemEdit` also accepts an optional final `snap` argument (default `true`).
 
 Double-click the current-time readout (or focus it and press Enter/F2) to enter a frame number or seconds in the selected display mode. Enter seeks through the existing playback controller, with frame snapping and playback-range clamping. Escape or leaving the field cancels the edit. A controller-free timeline updates its local playhead.
 
-### Keyboard presets
+### Operation presets
 
-The gear menu offers UE (default), Unity, Maya, and Logic inspired transport keyboard presets. Set `initialViewState.keyboardPreset` to `"ue" | "unity" | "maya" | "logic"`; `onViewStateChange` reports changes for host persistence. Existing mouse gestures, editing shortcuts, and host input controls retain their behavior. Tooltips and the settings hint show the active keys.
+The gear menu offers UE (default), Unity, Maya, and Logic inspired transport and navigation presets. Set `initialViewState.keyboardPreset` to `"ue" | "unity" | "maya" | "logic"`; `onViewStateChange` reports changes for host persistence. The existing saved field name is retained for compatibility. Transport tooltips reflect the selected keys; editing shortcuts and host inputs keep their existing ownership.
 
 | Preset | Play / pause | Previous / next frame | Other transport keys |
 | --- | --- | --- | --- |
@@ -325,4 +325,19 @@ The gear menu offers UE (default), Unity, Maya, and Logic inspired transport key
 | Maya | Alt+V | Alt+comma / Alt+period | Alt+Shift+V: start |
 | Logic | Space | Toolbar buttons | Enter: stop while playing, return to start when stopped; Shift+Enter: start; C: loop |
 
-Home fits the timeline in every preset. These are limited transport presets: Logic musical bar navigation and application-specific tools are not emulated. References: [UE playback options](https://dev.epicgames.com/documentation/en-us/unreal-engine/sequencer-cinematic-toolbar-in-unreal-engine), [Unity playback controls](https://docs.unity3d.com/Packages/com.unity.timeline@1.8/manual/tl-play-ctrls.html), [Maya shortcuts](https://www.autodesk.com/shortcuts/maya), [Logic transport](https://help.apple.com/logicpro/mac/9.1.6/en/logicpro/usermanual/chapter_5_section_2.html).
+Home fits the timeline in every preset. These are adapted timeline presets: Logic musical bar navigation and application-specific tools are not emulated. References: [UE playback options](https://dev.epicgames.com/documentation/en-us/unreal-engine/sequencer-cinematic-toolbar-in-unreal-engine), [Unity playback controls](https://docs.unity3d.com/Packages/com.unity.timeline@1.8/manual/tl-play-ctrls.html), [Maya shortcuts](https://www.autodesk.com/shortcuts/maya), [Logic transport](https://help.apple.com/logicpro/mac/9.1.6/en/logicpro/usermanual/chapter_5_section_2.html).
+
+| Preset | Wheel | Modified wheel | Pan drag |
+| --- | --- | --- | --- |
+| UE | Time zoom | Ctrl: row zoom; Shift: horizontal pan | Middle |
+| Unity | Time zoom | Ctrl/Command: row zoom; Shift: horizontal pan | Middle or Alt+left |
+| Maya | Time zoom | Ctrl: row zoom; Shift: horizontal pan | Alt+middle |
+| Logic | Vertical scroll | Ctrl/Command: horizontal pan; Alt: row zoom; Alt+Ctrl/Command: time zoom; Shift: horizontal pan | Middle |
+
+Horizontal trackpad input pans horizontally. Alt is Option on macOS; Ctrl is supported as a Windows alternative to Logic's Command. Unity's Alt+left gesture takes priority over starting a clip edit; Alt pressed after an edit begins still bypasses snapping. Pan cancellation with Escape or pointer cancellation restores the original scroll position.
+
+Navigation references: [Unity Timeline](https://docs.unity3d.com/Packages/com.unity.timeline@1.8/manual/clip-pan-zoom.html), [Maya Dope Sheet](https://help.autodesk.com/cloudhelp/2026/ENU/Maya-Animation/files/GUID-FCE19FDD-F428-4E75-8E32-E148E495CB70.htm), [Logic mouse modifiers](https://help.apple.com/logicpro/mac/9.1.6/en/logicpro/usermanual/chapter_8_section_1.html). These mappings cover this library's 2D timeline, not every tool in each application.
+
+Time display is a Frames/Seconds dropdown. With `onFrameRateChange` and no `frameRateOptions`, Frame rate is a free numeric field accepting finite positive values such as 29.97. Enter or blur commits; Escape cancels; invalid values reset. Existing hosts supplying `frameRateOptions` retain their named-choice picker. Speed is a live slider from 0.1x to 4x with a 0.05 step and a value readout; its bounds expand to display a host-provided rate outside that range.
+
+Loop OFF hides the loop lane and interval overlay without changing the saved interval. Loop ON restores them. Playback start/end handles remain available independently of looping.

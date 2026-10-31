@@ -366,7 +366,7 @@ describe("TimelineEditor transport and interaction boundary", () => {
   });
 
   it("sets a loop range by dragging the loop lane", () => {
-    const playback = controller();
+    const playback = controller({ looping: true });
     render(<TimelineEditor dataSource={source()} playbackController={playback} />);
     const lane = document.querySelector(".timeline-editor__loop-lane") as HTMLDivElement;
     const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
@@ -388,28 +388,23 @@ describe("TimelineEditor transport and interaction boundary", () => {
   });
 
   it("renders the loop range clear control when the controller reports one, and clears it", () => {
-    const playback = controller({ loopRange: { start: 2, end: 6 } });
+    const playback = controller({ looping: true, loopRange: { start: 2, end: 6 } });
     render(<TimelineEditor dataSource={source()} playbackController={playback} />);
     const clearButton = screen.getByRole("button", { name: "Clear loop range" });
     fireEvent.click(clearButton);
     expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "setLoopRange", range: null, target });
   });
 
-  it("sets a loop range locally (no dispatch) when there is no playback controller", () => {
-    render(<TimelineEditor dataSource={source()} />);
-    const lane = document.querySelector(".timeline-editor__loop-lane") as HTMLDivElement;
-    const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
-    Object.defineProperty(viewport, "getBoundingClientRect", { value: () => ({ left: 0, top: 0, width: 300, height: 100 }) });
-    const pointerDown = new Event("pointerdown", { bubbles: true });
-    Object.assign(pointerDown, { button: 0, pointerId: 9, clientX: 40 });
-    fireEvent(lane, pointerDown);
-    const pointerMove = new Event("pointermove", { bubbles: true });
-    Object.assign(pointerMove, { pointerId: 9, clientX: 120 });
-    fireEvent(lane, pointerMove);
-    const pointerUp = new Event("pointerup", { bubbles: true });
-    Object.assign(pointerUp, { pointerId: 9, clientX: 120 });
-    fireEvent(lane, pointerUp);
-    expect(screen.getByRole("button", { name: "Clear loop range" })).toBeTruthy();
+  it("hides loop editing without an active loop and preserves the host range", () => {
+    const range = { start: 2, end: 6 };
+    const view = render(<TimelineEditor dataSource={source()} playbackController={controller({ loopRange: range })} />);
+    expect(screen.queryByLabelText("Loop range")).toBeNull();
+    expect(document.querySelector(".timeline-editor__loop-region")).toBeNull();
+    const playback = controller({ looping: true, loopRange: range });
+    view.rerender(<TimelineEditor dataSource={source()} playbackController={playback} />);
+    expect(screen.getByLabelText("Loop range")).toBeTruthy();
+    expect(document.querySelector(".timeline-editor__loop-region")).toBeTruthy();
+    expect(playback.dispatch).not.toHaveBeenCalled();
   });
 
   it("reports rejected async commands and follows display props", async () => {
@@ -460,7 +455,7 @@ it("leaves custom inspector keyboard controls to the host", () => {
 });
 
 it("keeps external transport inside playback bounds while browsing outside the data", () => {
-  const playback = controller({ time: 2, range: { start: 2, end: 8 } });
+  const playback = controller({ looping: true, time: 2, range: { start: 2, end: 8 } });
   render(<TimelineEditor dataSource={source()} playbackController={playback}
     initialViewState={{ viewExtent: { start: -10, end: 20 }, pixelsPerSecond: 20 }} />);
   const viewport = screen.getByRole("application", { name: "Timeline scrubber" });
@@ -556,14 +551,14 @@ it("opens the host sidebar on item double-click and leaves its shortcuts host-ow
   const transport = controller();
   const onSelect = vi.fn(), onKeyDown = vi.fn();
   render(<TimelineEditor dataSource={data} playbackController={transport} editing={{ onSelect, onCommit: vi.fn() }}
-    sidebar={{ title: "Properties", content: <div role="slider" tabIndex={0} onKeyDown={onKeyDown} /> }} />);
+    sidebar={{ title: "Properties", content: <div role="slider" aria-label="Host slider" tabIndex={0} onKeyDown={onKeyDown} /> }} />);
   // Default scale is fit to the viewport; use the first hit's exact time at 1s.
   const viewport = screen.getByRole("application", { name: "Timeline scrubber" });
   const scale = Number(document.querySelector<HTMLElement>(".timeline-editor__content")?.style.width.replace("px", "")) / 10;
   fireEvent.doubleClick(viewport, { clientX: scale, clientY: 10 });
   expect(onSelect).toHaveBeenCalledWith(data.getItems({ rowIds: [rowId], range: { start: 0, end: 10 } })[0]);
   expect(screen.getByRole("complementary", { name: "Properties" })).toBeTruthy();
-  fireEvent.keyDown(screen.getByRole("slider"), { key: " " });
+  fireEvent.keyDown(screen.getByRole("slider", { name: "Host slider" }), { key: " " });
   expect(onKeyDown).toHaveBeenCalledOnce();
   expect(transport.dispatch).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Close Properties" }));
@@ -599,7 +594,7 @@ it("opens the host sidebar on item double-click and leaves its shortcuts host-ow
  it("uses Logic loop and return keys and reports preset changes for host persistence", () => {
    const playback = controller(); const changed = vi.fn();
    render(<TimelineEditor dataSource={source()} playbackController={playback} onViewStateChange={changed} />);
-   fireEvent.change(screen.getByLabelText("Keyboard preset"), { target: { value: "logic" } });
+   fireEvent.change(screen.getByLabelText("Operation preset"), { target: { value: "logic" } });
    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ keyboardPreset: "logic" }));
    const viewport = screen.getByRole("application", { name: "Timeline scrubber" });
    fireEvent.keyDown(viewport, { key: "c" });
@@ -639,3 +634,17 @@ it("opens the host sidebar on item double-click and leaves its shortcuts host-ow
      expect(playback.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "seek", time: expect.closeTo(expected, 8) }));
    }
  );
+
+it("accepts fractional FPS input and cancels invalid values", () => {
+  const changed = vi.fn();
+  render(<TimelineEditor dataSource={source()} frameRate={30} onFrameRateChange={changed} />);
+  const input = screen.getByRole("spinbutton", { name: "Frame rate" });
+  fireEvent.change(input, { target: { value: "29.97" } }); fireEvent.blur(input);
+  expect(changed).toHaveBeenCalledExactlyOnceWith("29.97");
+  changed.mockClear();
+  for (const value of ["", "0", "-24"]) {
+    fireEvent.change(input, { target: { value } }); fireEvent.blur(input);
+  }
+  expect(changed).not.toHaveBeenCalled();
+  expect((input as HTMLInputElement).value).toBe("30");
+});

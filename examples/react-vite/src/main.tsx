@@ -95,8 +95,6 @@ function Example(): JSX.Element {
           showTitle={false}
           playbackController={audio.controller}
           frameRate={fps}
-          frameRateOptions={Array.from(new Set([24, 25, 30, 48, 50, 60, fps])).sort((a, b) => a - b).map(rate => ({ value: String(rate), label: `${rate} fps` }))}
-          frameRateValue={String(fps)}
           onFrameRateChange={value => setFps(Number(value))}
           variant={variant}
           slots={{ settings: <label>Theme<select aria-label="Theme" title="Theme" value={theme} onChange={event => setTheme(event.target.value as "dark" | "light")}><option value="dark">Dark</option><option value="light">Light</option></select></label>, inspector: audio.properties, toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack, rowActions: audio.rowActions, rowIcon: audio.rowIcon }}

@@ -40,7 +40,7 @@ test("layout and timeline preferences survive reload; invalid storage is ignored
   await expect(tree).toHaveAttribute("aria-valuenow", "222");
   await page.getByRole("button", { name: "Snap to frames" }).click();
   await page.getByLabel("Timeline settings").click();
-  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await page.getByLabel("Time display", { exact: true }).selectOption((await page.getByLabel("Time display", { exact: true }).inputValue()) === "frames" ? "seconds" : "frames");
   await page.getByLabel("Timeline settings").click();
   await page.reload();
   await expect(split).toHaveAttribute("aria-valuenow", height!);
@@ -104,7 +104,7 @@ for (const fps of [24, 30]) test(`time editing and clip feedback follow the disp
   await setPlaybackEdge(page, "start", 1);
   await setPlaybackEdge(page, "end", 8);
   await page.getByLabel("Timeline settings").click();
-  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await page.getByLabel("Time display", { exact: true }).selectOption((await page.getByLabel("Time display", { exact: true }).inputValue()) === "frames" ? "seconds" : "frames");
   await page.getByLabel("Timeline settings").click();
   await expect(out).toHaveAttribute("aria-valuetext", "8.00 s"); await expect(input).toHaveAttribute("aria-valuetext", "1.00 s");
   await expect(clip).toHaveAttribute("title", / s — .* s$/);
@@ -114,7 +114,7 @@ for (const fps of [24, 30]) test(`time editing and clip feedback follow the disp
   await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
   await expect(out).toHaveAttribute("aria-valuetext", "8.00 s");
   await page.getByLabel("Timeline settings").click();
-  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await page.getByLabel("Time display", { exact: true }).selectOption((await page.getByLabel("Time display", { exact: true }).inputValue()) === "frames" ? "seconds" : "frames");
   await page.getByLabel("Timeline settings").click();
   await expect(out).toHaveAttribute("aria-valuetext", `${8 * fps} f`);
   await expect(input).toHaveAttribute("aria-valuetext", `${fps} f`);
@@ -124,7 +124,7 @@ for (const fps of [24, 30]) test(`time editing and clip feedback follow the disp
 test("viewing a sub-frame endpoint as frames does not round the saved edit", async ({ page }) => {
   await page.goto("/?fps=30");
   await page.getByLabel("Timeline settings").click();
-  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await page.getByLabel("Time display", { exact: true }).selectOption((await page.getByLabel("Time display", { exact: true }).inputValue()) === "frames" ? "seconds" : "frames");
   await page.getByLabel("Timeline settings").click();
   const clip = page.getByRole("button", { name: "Clip Animation", exact: true });
   await clip.dblclick({ position: { x: 40, y: 20 } });
@@ -132,13 +132,13 @@ test("viewing a sub-frame endpoint as frames does not round the saved edit", asy
   await end.fill("11.999"); await end.press("Enter");
   await expect(clip).toHaveAttribute("data-end", "11.999");
   await page.getByLabel("Timeline settings").click();
-  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await page.getByLabel("Time display", { exact: true }).selectOption((await page.getByLabel("Time display", { exact: true }).inputValue()) === "frames" ? "seconds" : "frames");
   await page.getByLabel("Timeline settings").click();
   await expect(end).toHaveValue("360");
   await end.focus(); await end.press("Tab");
   await expect(clip).toHaveAttribute("data-end", "11.999");
   await page.getByLabel("Timeline settings").click();
-  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await page.getByLabel("Time display", { exact: true }).selectOption((await page.getByLabel("Time display", { exact: true }).inputValue()) === "frames" ? "seconds" : "frames");
   await page.getByLabel("Timeline settings").click();
   await expect(end).toHaveValue("11.999");
 });

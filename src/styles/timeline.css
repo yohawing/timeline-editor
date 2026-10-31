@@ -611,13 +611,12 @@ button.timeline-editor__row-disclosure { background: none; border: 0; padding: 0
 .timeline-editor__time-input { width: 7rem; }
 
 .timeline-editor__settings-heading { color: var(--timeline-text-dim); font-size: 10px; border-bottom: 1px solid var(--timeline-divider); padding-bottom: 4px; }
-.timeline-editor__settings-panel label, .timeline-editor__setting-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; }
+.timeline-editor__settings-panel label { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; }
 .timeline-editor__settings-panel input, .timeline-editor__settings-panel select {
   width: 85px; box-sizing: border-box; background: var(--timeline-surface-0); color: var(--timeline-text);
   border: 1px solid var(--timeline-divider); border-radius: 3px; padding: 3px;
 }
 .timeline-editor__settings-panel input:disabled, .timeline-editor__settings-panel select:disabled { opacity: .42; }
-.timeline-editor__shortcut-help { font-size: 10px; color: var(--timeline-text-dim); }
 
 /* The viewport, settings and host panels share one compact scrollbar style. */
 .timeline-editor * { scrollbar-width: thin; scrollbar-color: var(--timeline-scrollbar) transparent; }
@@ -628,3 +627,7 @@ button.timeline-editor__row-disclosure { background: none; border: 0; padding: 0
 .timeline-editor ::-webkit-scrollbar-corner { background: transparent; }
 .timeline-editor__settings-panel input, .timeline-editor__settings-panel select { min-height: var(--timeline-control-height); }
 .timeline-editor__settings-panel { gap: 10px; }
+
+.timeline-editor__speed-control { display: flex; align-items: center; gap: 6px; }
+.timeline-editor__speed-control output { min-width: 3em; text-align: right; font-variant-numeric: tabular-nums; }
+.timeline-editor__settings-panel input[type=range] { width: 85px; padding: 0; border: 0; accent-color: var(--timeline-accent); }

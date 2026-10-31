@@ -1,6 +1,7 @@
+import { isPanGesture, type TimelineKeyboardPreset } from "./keyboardPresets";
 import { useRef, type RefObject, type PointerEvent, type KeyboardEvent, type MouseEvent } from "react";
 
-export function useMiddlePan(viewport: RefObject<HTMLDivElement | null>) {
+export function useMiddlePan(viewport: RefObject<HTMLDivElement | null>, preset: TimelineKeyboardPreset = "ue") {
   const drag = useRef<{ pointer: number; x: number; y: number; left: number; top: number; element: HTMLDivElement } | null>(null);
   const finish = (cancel: boolean) => {
     const start = drag.current;
@@ -12,7 +13,11 @@ export function useMiddlePan(viewport: RefObject<HTMLDivElement | null>) {
   };
   return {
     onPointerDownCapture: (event: PointerEvent<HTMLDivElement>) => {
-      if (event.button !== 1 || !viewport.current) return;
+      if (!viewport.current) return;
+      if (!isPanGesture(preset, event)) {
+        if (event.button === 1) event.preventDefault(); // Suppress browser autoscroll for unbound middle gestures.
+        return;
+      }
       event.preventDefault(); event.stopPropagation(); viewport.current.focus();
       drag.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, left: viewport.current.scrollLeft, top: viewport.current.scrollTop, element: event.currentTarget };
       event.currentTarget.classList.add("is-panning");

@@ -1,4 +1,4 @@
-import { keyboardAction, keyboardPresets, normalizeKeyboardPreset, type TimelineKeyboardPreset } from "./keyboardPresets";
+import { wheelAction, keyboardAction, keyboardPresets, normalizeKeyboardPreset, type TimelineKeyboardPreset } from "./keyboardPresets";
 export type { TimelineKeyboardPreset } from "./keyboardPresets";
 import {
   useCallback,
@@ -175,7 +175,7 @@ export interface TimelineEditorProps {
    * (`frameRateValue`) and receives the pick. Values are opaque strings so a
    * host can offer entries like "auto" next to numbers; `frameRate` itself
    * stays the number used for display/snapping. Omit `frameRateOptions` to
-   * keep the read-only label.
+   * use numeric input when onFrameRateChange is provided, otherwise a read-only label.
    */
   frameRateOptions?: ReadonlyArray<{ value: string; label: string }>;
   frameRateValue?: string;
@@ -644,7 +644,7 @@ export function TimelineEditor({
   const loopPointerIdRef = useRef<number | null>(null);
   const loopDragOriginRef = useRef(range.start);
   const timelineViewportRef = useRef<HTMLDivElement>(null);
-  const panHandlers = useMiddlePan(timelineViewportRef);
+  const panHandlers = useMiddlePan(timelineViewportRef, keyboardPreset);
   const treeViewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rootRef = useRef<HTMLElement>(null);
@@ -792,6 +792,9 @@ export function TimelineEditor({
   const clipEditing = useClipEditing({ editing, dataSource, viewport: timelineViewportRef, scale: pixelsPerSecond, rowHeight, range, fps, displayMode, snap, scrollLeft: scroll.left, width: viewport.width });
   const editableClips = editing ? dataSource.getItems(visibleQuery).filter(item => item.kind === "clip" && editing.canEditClip(item)) : [];
   const commandTarget = resolveTimelinePlaybackTarget(selectedTarget, playbackSnapshot);
+  useEffect(() => {
+    if (!canTransport || !playbackSnapshot.looping) { loopPointerIdRef.current = null; setLoopDragPreview(null); }
+  }, [canTransport, playbackSnapshot.looping]);
   const loopRange = canTransport ? (playbackSnapshot.loopRange ?? null) : localLoopRange;
 
   const updateReadout = useCallback((nextTime: number) => {
@@ -1068,32 +1071,31 @@ export function TimelineEditor({
   const viewRef = useRef<{ pixelsPerSecond: number; duration: number; width: number }>({ pixelsPerSecond, duration, width: viewport.width });
   viewRef.current = { pixelsPerSecond, duration, width: viewport.width };
 
-  /**
-   * Wheel over the ruler or the track viewport (UE Sequencer conventions):
-   *   wheel        -> zoom the time axis around the pointer
-   *   Ctrl+wheel   -> zoom row height (vertical)
-   *   Shift+wheel  -> pan horizontally (a trackpad's horizontal delta pans too)
-   * Native listener (not React's onWheel) so the default page/viewport
-   * scroll can be prevented — React registers wheel as passive.
-   */
+  /** Non-passive wheel navigation follows the selected operation preset. */
   useEffect(() => {
     const viewportElement = timelineViewportRef.current;
     if (!viewportElement) return;
     const onWheel = (event: WheelEvent) => {
       if (editDrag.current) { event.preventDefault(); return; }
-      if (event.altKey || event.metaKey) return;
+      const action = wheelAction(keyboardPreset, event);
+      if (!action) return;
       const { duration: clipDuration, width } = viewRef.current;
       const base: ViewRange = pendingViewRef.current ?? { pixelsPerSecond: viewRef.current.pixelsPerSecond, scrollLeft: viewportElement.scrollLeft };
       const pps = base.pixelsPerSecond;
-      if (event.ctrlKey) {
+      if (action === "row-zoom") {
         event.preventDefault();
         setRowZoom((zoom) => clampRowZoom(zoom * wheelRowZoomFactor(event.deltaY, event.deltaMode)));
         return;
       }
-      const horizontal = event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY);
-      if (horizontal) {
+      if (action === "pan-y") {
         event.preventDefault();
-        const raw = event.shiftKey ? (event.deltaY || event.deltaX) : event.deltaX;
+        const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaMode === 2 ? event.deltaY * viewportElement.clientHeight : event.deltaY;
+        viewportElement.scrollTop += delta;
+        return;
+      }
+      if (action === "pan-x") {
+        event.preventDefault();
+        const raw = event.shiftKey || event.ctrlKey || event.metaKey ? (event.deltaY || event.deltaX) : event.deltaX;
         const delta = event.deltaMode === 1 ? raw * 16 : event.deltaMode === 2 ? raw * width : raw;
         applyView({ pixelsPerSecond: pps, scrollLeft: base.scrollLeft + delta });
         return;
@@ -1117,7 +1119,7 @@ export function TimelineEditor({
       viewportElement.removeEventListener("wheel", onWheel);
       rulerElement?.removeEventListener("wheel", onWheel);
     };
-  }, [applyView, allowViewOutsideRange]);
+  }, [applyView, allowViewOutsideRange, keyboardPreset]);
 
   const thumb = viewRangeThumb({ pixelsPerSecond, scrollLeft: scroll.left }, duration, viewport.width);
 
@@ -1173,7 +1175,7 @@ export function TimelineEditor({
       ? { start: drag.thumb.start + dx, end: drag.thumb.end }
       : { start: drag.thumb.start, end: drag.thumb.end + dx };
     applyDrag(viewRangeFromThumb(next, dragDuration, width, drag.mode === "start" ? "end" : "start", true));
-  }, [applyView, allowViewOutsideRange]);
+  }, [applyView, allowViewOutsideRange, keyboardPreset]);
 
   const onRangeBarPointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = rangeDragRef.current;
@@ -1409,29 +1411,42 @@ export function TimelineEditor({
             <summary className="timeline-editor__button" aria-label="Timeline settings" title="Timeline settings"><SettingsIcon /></summary>
             <div className="timeline-editor__settings-panel" style={{ maxHeight: viewport.height }}>
               <span className="timeline-editor__settings-heading">Controls</span>
-              <label>Keyboard preset
-                <select aria-label="Keyboard preset" value={keyboardPreset} onChange={event => setKeyboardPreset(normalizeKeyboardPreset(event.target.value))}>
+              <label>Operation preset
+                <select aria-label="Operation preset" value={keyboardPreset} onChange={event => setKeyboardPreset(normalizeKeyboardPreset(event.target.value))}>
                   {Object.entries(keyboardPresets).map(([value, preset]) => <option key={value} value={value}>{preset.label}</option>)}
                 </select>
               </label>
-              <small className="timeline-editor__shortcut-help">Play / Pause: {keyboardPresets[keyboardPreset].keys.toggle}<br />
-                {keyboardPresets[keyboardPreset].keys.previous ? `Frame: ${keyboardPresets[keyboardPreset].keys.previous} / ${keyboardPresets[keyboardPreset].keys.next}` : "Enter: Stop / return · C: Loop"}
-              </small>
               <span className="timeline-editor__settings-heading">Display</span>
-              <div className="timeline-editor__setting-row"><span>Time display</span><button type="button" className="timeline-editor__button timeline-editor__button--text" onClick={() => setDisplayMode(mode => mode === "frames" ? "seconds" : "frames")} aria-label="Toggle time display" title="Switch frames / seconds">{displayMode === "frames" ? "Frames" : "Seconds"} ⇄</button></div>
+              <label>Time display
+                <select aria-label="Time display" value={displayMode} onChange={event => setDisplayMode(event.target.value as "frames" | "seconds")}>
+                  <option value="frames">Frames</option><option value="seconds">Seconds</option>
+                </select>
+              </label>
               <label>Frame rate
-          {frameRateOptions ? (
-            <select
-              className="timeline-editor__fps timeline-editor__fps-select"
-              aria-label="Frame rate"
-              value={frameRateValue ?? String(fps)}
-              onChange={(event) => onFrameRateChange?.(event.target.value)}
-            >
-              {frameRateOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          ) : (
-            <span className="timeline-editor__fps">{fps} fps</span>
-          )}
+                {frameRateOptions ? (
+                  <select
+                    className="timeline-editor__fps timeline-editor__fps-select"
+                    aria-label="Frame rate"
+                    value={frameRateValue ?? String(fps)}
+                    onChange={(event) => onFrameRateChange?.(event.target.value)}
+                  >
+                    {frameRateOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                ) : onFrameRateChange ? (
+                  <input key={fps} type="number" aria-label="Frame rate" defaultValue={fps} step="any"
+                    onBlur={event => {
+                      const value = Number(event.currentTarget.value);
+                      if (event.currentTarget.value.trim() && Number.isFinite(value) && value > 0 && value !== fps) onFrameRateChange(String(value));
+                      event.currentTarget.value = String(fps);
+                    }}
+                    onKeyDown={event => {
+                      event.stopPropagation();
+                      if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); }
+                      if (event.key === "Escape") { event.preventDefault(); event.currentTarget.value = String(fps); event.currentTarget.blur(); }
+                    }} />
+                ) : (
+                  <span className="timeline-editor__fps">{fps} fps</span>
+                )}
               </label>
               <span className="timeline-editor__settings-heading">Playback</span>
               {(["start", "end"] as const).map(edge => {
@@ -1461,15 +1476,18 @@ export function TimelineEditor({
                 </label>;
               })}
               <label>Speed
-                <select aria-label="Playback speed" disabled={!canTransport} value={playbackRate}
-                  onChange={event => dispatchTransport({ type: "setRate", rate: Number(event.target.value) })}>
-                  {Array.from(new Set<number>([...TIMELINE_RATE_STEPS, playbackRate])).sort((a, b) => a - b).map(rate => <option key={rate} value={rate}>{formatTimelineRate(rate)}</option>)}
-                </select>
+                <span className="timeline-editor__speed-control">
+                  <input type="range" aria-label="Playback speed" disabled={!canTransport} value={playbackRate}
+                    min={Math.min(0.1, playbackRate)} max={Math.max(4, playbackRate)} step="0.05"
+                    aria-valuetext={formatTimelineRate(playbackRate)}
+                    onChange={event => dispatchTransport({ type: "setRate", rate: Number(event.target.value) })} />
+                  <output>{formatTimelineRate(playbackRate)}</output>
+                </span>
               </label>
               {slots?.settings}
             </div>
           </details>
-          <button type="button" className={`timeline-editor__button${snap ? " is-active" : ""}`} aria-label="Snap to frames" aria-pressed={snap} title={`Snap to frames: ${snap ? "On" : "Off"} · Alt-drag to bypass`} onClick={() => setSnap(!snap)}><SnapIcon /></button>
+          <button type="button" className={`timeline-editor__button${snap ? " is-active" : ""}`} aria-label="Snap to frames" aria-pressed={snap} title={`Snap to frames: ${snap ? "On" : "Off"} · ${keyboardPreset === "unity" ? "Hold Alt after starting a drag to bypass; Alt+drag pans" : "Alt-drag to bypass"}`} onClick={() => setSnap(!snap)}><SnapIcon /></button>
           <div className="timeline-editor__slot timeline-editor__slot--end">{slots?.toolbarEnd}
             {sidebar && <button type="button" className="timeline-editor__button timeline-editor__sidebar-toggle" aria-label={`Toggle ${sidebar.title}`} title={`Toggle ${sidebar.title}`} aria-controls={sidebarId} aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(open => !open)}>{sidebar.title}</button>}
           </div>
@@ -1508,7 +1526,7 @@ export function TimelineEditor({
             {canTransport && onChangePlaybackRange && <PlaybackRangeHandles snap={snap} range={playbackRangePreview ?? playbackRange} viewStart={range.start} scale={pixelsPerSecond} scrollLeft={scroll.left} width={viewport.width} fps={fps} displayMode={displayMode} onPreview={setPlaybackRangePreview} onChange={onChangePlaybackRange} />}
             <span ref={tickWidthProbeRef} className="timeline-editor__tick timeline-editor__tick--measure" aria-hidden="true">00000000</span>
             {ticks.map((tick) => <span className="timeline-editor__tick" key={tick} style={{ left: `${Math.max(tickLabelWidth / 2, Math.min(viewport.width - tickLabelWidth / 2, ((tick - range.start) * pixelsPerSecond) - scroll.left))}px` }}>{formatTimelineTick(tick, displayMode, fps)}</span>)}
-            <div
+            {canTransport && playbackSnapshot.looping && <div
               className="timeline-editor__loop-lane"
               aria-label="Loop range"
               title="Drag to set a loop range. Double-click to clear."
@@ -1517,7 +1535,7 @@ export function TimelineEditor({
               onPointerUp={finishLoopDrag}
               onPointerCancel={finishLoopDrag}
               onDoubleClick={clearLoopRange}
-            />
+            />}
           </div>
           <div
             className="timeline-editor__viewport"
@@ -1543,7 +1561,7 @@ export function TimelineEditor({
             {canTransport && [(playbackRangePreview ?? playbackRange).start, (playbackRangePreview ?? playbackRange).end].map((boundary, index) => <div key={index} className={`timeline-editor__playback-boundary timeline-editor__playback-boundary--${index === 0 ? "start" : "end"}`} title={index === 0 ? "Playback start" : "Playback end"} style={{ left: (boundary - range.start) * pixelsPerSecond, height: Math.max(totalHeight, viewport.height) }} />)}
             <div className="timeline-editor__range-action">{slots?.diagnosticAction}</div>
           </div>
-          {loopRangeStyle && (
+          {canTransport && playbackSnapshot.looping && loopRangeStyle && (
             <div className="timeline-editor__loop-region" style={loopRangeStyle}>
               {!loopDragPreview && (
                 <button type="button" className="timeline-editor__loop-clear" title="Clear loop range" aria-label="Clear loop range" onClick={clearLoopRange}>×</button>
