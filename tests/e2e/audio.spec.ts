@@ -318,7 +318,6 @@ test("project edits and original audio survive reload and still play", async ({ 
   await drop(page, 0, 0, "persisted.wav");
   const clip = page.getByRole("button", { name: "Clip persisted.wav", exact: true });
   await expect(clip.getByLabel("Audio waveform")).toBeVisible();
-  let waveform = await clip.locator("path").getAttribute("d");
   await clip.dblclick({ position: { x: 40, y: 20 } });
   const volume = page.getByRole("slider", { name: "Volume" });
   await volume.fill("0.4");
@@ -338,7 +337,10 @@ test("project edits and original audio survive reload and still play", async ({ 
   await page.getByLabel("Disable", { exact: true }).check();
   await page.getByRole("button", { name: "Close properties" }).click();
   await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
-  waveform = await clip.locator("path").getAttribute("d");
+  // Inspector closure resizes the viewport asynchronously through ResizeObserver.
+  // Capture the full-width waveform, not the previous inspector-width rendering.
+  await waitForTimelineLayout(page);
+  const waveform = await clip.locator("path").getAttribute("d");
   await page.reload();
   await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
   await expect(motion).toHaveAttribute("data-start", motionStart!);
@@ -347,6 +349,7 @@ test("project edits and original audio survive reload and still play", async ({ 
   await page.getByRole("button", { name: "Close properties" }).click();
   await expect(page.getByRole("button", { name: "Solo Music", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "Event Event", exact: true })).toBeVisible();
+  await waitForTimelineLayout(page);
   await expect(clip.locator("path")).toHaveAttribute("d", waveform!);
   await clip.dblclick({ position: { x: 40, y: 20 } });
   await expect(volume).toHaveValue("0.4");
