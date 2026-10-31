@@ -7,6 +7,8 @@ export interface TimelinePlaybackSnapshot {
   readonly available: boolean;
   readonly time: number;
   readonly duration: number;
+  /** Absolute canonical bounds; omitted by legacy zero-based hosts. */
+  readonly range?: TimeRange;
   readonly playing: boolean;
   readonly looping: boolean;
   /**
@@ -39,6 +41,7 @@ export type TimelinePlaybackCommand =
   | ({ type: "seek"; time: number } & TargetedPlaybackCommand)
   | ({ type: "setLooping"; looping: boolean } & TargetedPlaybackCommand)
   | ({ type: "setRate"; rate: number } & TargetedPlaybackCommand)
+  | ({ type: "setPlaybackRange"; range: TimeRange } & TargetedPlaybackCommand)
   | ({ type: "setLoopRange"; range: TimeRange | null } & TargetedPlaybackCommand);
 
 export interface TimelinePlaybackController {
@@ -71,28 +74,32 @@ export function projectTimelinePlaybackTime(
   nowUnixMs = Date.now(),
 ): number {
   const duration = Number.isFinite(snapshot.duration) && snapshot.duration >= 0 ? snapshot.duration : 0;
-  const base = clampTimelineTime(snapshot.time, duration);
+  const range = snapshot.range ?? { start: 0, end: duration };
+  const base = clampTimelineTime(snapshot.time, range);
   if (!snapshot.available || !snapshot.playing || !Number.isFinite(snapshot.sampledAtUnixMs)) return base;
   const rate = Number.isFinite(snapshot.rate) && (snapshot.rate as number) > 0 ? (snapshot.rate as number) : 1;
   const elapsed = (Math.max(0, nowUnixMs - (snapshot.sampledAtUnixMs ?? nowUnixMs)) / 1000) * rate;
   const projected = base + elapsed;
   if (snapshot.looping && duration > 0) {
-    const loopRange = clampTimelineLoopRange(snapshot.loopRange, duration);
-    const loopStart = loopRange?.start ?? 0;
-    const loopEnd = loopRange?.end ?? duration;
+    const loopRange = clampTimelineLoopRange(snapshot.loopRange, range);
+    const loopStart = loopRange?.start ?? range.start;
+    const loopEnd = loopRange?.end ?? range.end;
     const span = loopEnd - loopStart;
     if (span > 0 && projected >= loopStart) return loopStart + ((projected - loopStart) % span);
-    return projected % duration;
+    return range.start + ((projected - range.start) % duration);
   }
-  return Math.min(duration, projected);
+  return Math.min(range.end, projected);
 }
 
-export function createLocalPlaybackController(duration: number, initialTime = 0): TimelinePlaybackController {
-  if (!Number.isFinite(duration) || duration < 0) throw new RangeError("Playback duration must be finite and non-negative");
+export function createLocalPlaybackController(durationOrRange: number | TimeRange, initialTime?: number): TimelinePlaybackController {
+  let range = typeof durationOrRange === "number" ? { start: 0, end: durationOrRange } : durationOrRange;
+  let duration = range.end - range.start;
+  if (!Number.isFinite(range.start) || !Number.isFinite(range.end) || !Number.isFinite(duration) || duration < 0) throw new RangeError("Playback duration must be finite and non-negative");
   let snapshot: TimelinePlaybackSnapshot = {
     available: true,
-    time: clampTimelineTime(initialTime, duration),
+    time: clampTimelineTime(initialTime ?? range.start, range),
     duration,
+    range,
     playing: false,
     looping: false,
     rate: 1,
@@ -119,15 +126,15 @@ export function createLocalPlaybackController(duration: number, initialTime = 0)
       lastTick = now;
       let time = snapshot.time + delta;
       let playing = true;
-      const loopRange = clampTimelineLoopRange(snapshot.loopRange, duration);
-      const loopEnd = loopRange?.end ?? duration;
+      const loopRange = clampTimelineLoopRange(snapshot.loopRange, range);
+      const loopEnd = snapshot.looping ? (loopRange?.end ?? range.end) : range.end;
       if (time >= loopEnd) {
         if (snapshot.looping && duration > 0) {
-          const loopStart = loopRange?.start ?? 0;
+          const loopStart = loopRange?.start ?? range.start;
           const span = loopEnd - loopStart;
           time = span > 0 ? loopStart + ((time - loopStart) % span) : 0;
         } else {
-          time = duration;
+          time = range.end;
           playing = false;
           stopTimer();
         }
@@ -141,6 +148,9 @@ export function createLocalPlaybackController(duration: number, initialTime = 0)
     getSnapshot: () => snapshot,
     subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
     dispatch: (command) => {
+      // Settle elapsed time before changing state/rate or seeking.
+      snapshot = { ...snapshot, time: projectTimelinePlaybackTime(snapshot), sampledAtUnixMs: Date.now() };
+      lastTick = performance.now();
       switch (command.type) {
         case "play":
           if (!snapshot.playing) { snapshot = { ...snapshot, target: command.target, playing: true, sampledAtUnixMs: Date.now() }; startTimer(); notify(); }
@@ -150,7 +160,7 @@ export function createLocalPlaybackController(duration: number, initialTime = 0)
           if (snapshot.playing) { snapshot = { ...snapshot, target: command.target, playing: false }; notify(); }
           break;
         case "seek":
-          snapshot = { ...snapshot, target: command.target, time: clampTimelineTime(command.time, duration), sampledAtUnixMs: Date.now() };
+          snapshot = { ...snapshot, target: command.target, time: clampTimelineTime(command.time, range), sampledAtUnixMs: Date.now() };
           notify();
           break;
         case "setLooping":
@@ -158,9 +168,17 @@ export function createLocalPlaybackController(duration: number, initialTime = 0)
           notify();
           break;
         case "setLoopRange":
-          snapshot = { ...snapshot, target: command.target, loopRange: clampTimelineLoopRange(command.range, duration) };
+          snapshot = { ...snapshot, target: command.target, loopRange: clampTimelineLoopRange(command.range, range) };
           notify();
           break;
+        case "setPlaybackRange": {
+          const next = command.range;
+          if (!Number.isFinite(next.start) || !Number.isFinite(next.end) || !Number.isFinite(next.end - next.start) || next.end <= next.start) throw new RangeError("Invalid playback range");
+          range = { ...next }; duration = range.end - range.start;
+          snapshot = { ...snapshot, target: command.target, range, duration, time: clampTimelineTime(snapshot.time, range), loopRange: clampTimelineLoopRange(snapshot.loopRange, range) };
+          notify();
+          break;
+        }
         case "setRate": {
           const rate = Number.isFinite(command.rate) && command.rate > 0 ? command.rate : 1;
           snapshot = { ...snapshot, target: command.target, rate };

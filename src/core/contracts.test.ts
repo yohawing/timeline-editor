@@ -18,7 +18,7 @@ describe("timeline core contracts", () => {
     expect(normalizeTime(1.25)).toBe(1.25);
     expect(() => normalizeTime(Number.POSITIVE_INFINITY)).toThrow("finite seconds");
     expect(normalizeTimeRange({ start: 0, end: 2 })).toEqual({ start: 0, end: 2 });
-    expect(() => normalizeTimeRange({ start: -1, end: 2 })).toThrow();
+    expect(normalizeTimeRange({ start: -1, end: 2 })).toEqual({ start: -1, end: 2 });
     expect(() => normalizeTimeRange({ start: 3, end: 2 })).toThrow();
   });
 

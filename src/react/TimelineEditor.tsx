@@ -41,7 +41,6 @@ import {
 import {
   clampPixelsPerSecond,
   clampRowZoom,
-  clampScrollLeft,
   fitPixelsPerSecond,
   panViewByFraction,
   timelineGridSteps,
@@ -65,6 +64,15 @@ import {
   type TimelinePlaybackTarget,
 } from "../core/playback";
 import "../styles/timeline.css";
+import { PlaybackRangeHandles } from "./PlaybackRangeHandles";
+import { useMiddlePan } from "./useMiddlePan";
+import { RowLabel } from "./RowLabel";
+import { TrackDivider } from "./TrackDivider";
+import { useCanvasTheme, type CanvasColors } from "./canvasTheme";
+import { EventCue, type TimelineEventEditing } from "./EventCue";
+export type { TimelineEventEditing } from "./EventCue";
+import { useClipEditing, type TimelineEditing } from "./clipEditing";
+export type { TimelineEditing } from "./clipEditing";
 import {
   NavigateBeforeIcon,
   NavigateNextIcon,
@@ -92,24 +100,54 @@ export interface TimelinePerformanceSummary {
 }
 
 export interface TimelineEditorSlots {
+  /** Optional host-owned properties panel, laid out inside the editor. */
+  inspector?: ReactNode;
+  tracksHeaderEnd?: ReactNode;
+  /** Host-owned controls for each visible row. */
+  rowActions?: (row: TimelineRow) => ReactNode;
+  /** Optional host-owned track type icon before the row label. */
+  rowIcon?: (row: TimelineRow) => ReactNode;
   toolbarStart?: ReactNode;
   toolbarEnd?: ReactNode;
   emptyState?: ReactNode;
   diagnosticAction?: ReactNode;
 }
 
+export interface TimelineViewState {
+  /** Expanded browsing bounds, separate from project/playback data. */
+  viewExtent?: TimeRange | null;
+  treeWidth: number | null;
+  pixelsPerSecond: number | null;
+  rowZoom: number;
+  snap: boolean;
+  displayMode: "frames" | "seconds";
+}
+
+export interface TimelineHostEditing {
+  onSelect?: (item: TimelineItem) => void;
+  onStart?: () => void;
+  onCommit: (edit: TimelineItemEdit) => void;
+}
+
 export interface TimelineEditorProps {
-  dataSource: TimelineDataSource;
-  /** Optional host content in the built-in right sidebar. */
+  /** Compatible host-owned item editing and optional overlay inspector. */
   sidebar?: { title: string; content: ReactNode };
-  /** Opt-in item editing. The host owns validation, persistence and history. */
   selectedItem?: { id: string; kind: TimelineItem["kind"] };
   renderRowActions?: (row: TimelineRow) => ReactNode;
-  editing?: {
-    onSelect?: (item: TimelineItem) => void;
-    onStart?: () => void;
-    onCommit: (edit: TimelineItemEdit) => void;
-  };
+  theme?: "dark" | "light";
+  /** Commit a playback-boundary gesture; the host owns transport, persistence and undo. */
+  onChangePlaybackRange?: (range: TimeRange) => void;
+  /** Initial view preferences; persistence remains owned by the host. */
+  initialViewState?: Partial<TimelineViewState>;
+  onViewStateChange?: (state: TimelineViewState) => void;
+  dataSource: TimelineDataSource;
+  editing?: TimelineEditing | TimelineHostEditing;
+  eventEditing?: TimelineEventEditing;
+  /** Request insertion beside a row; the host owns hierarchy, order and undo. */
+  onReorderRow?: (rowId: TimelineRow["id"], targetRowId: TimelineRow["id"], position: "before" | "after") => void;
+  onMoveRow?: (rowId: TimelineRow["id"], parentId: TimelineRow["id"] | null) => void;
+  onToggleRow?: (rowId: TimelineRow["id"]) => void;
+  onRenameRow?: (rowId: TimelineRow["id"], label: string) => void;
   playbackController?: TimelinePlaybackController;
   frameRate?: number;
   displayMode?: "frames" | "seconds";
@@ -165,7 +203,7 @@ function formatTimelineRate(rate: number): string {
 
 function safeRange(dataSource: TimelineDataSource): { start: number; end: number } {
   const range = dataSource.getRange();
-  const start = Number.isFinite(range.start) ? Math.max(0, range.start) : 0;
+  const start = Number.isFinite(range.start) ? range.start : 0;
   const end = Number.isFinite(range.end) ? Math.max(start, range.end) : start;
   return { start, end };
 }
@@ -195,22 +233,24 @@ function normalizePlaybackSnapshot(value: unknown): TimelinePlaybackSnapshot {
   if (!value || typeof value !== "object") return EMPTY_PLAYBACK;
   const raw = value as Partial<Record<keyof TimelinePlaybackSnapshot, unknown>>;
   const durationIsValid = typeof raw.duration === "number" && Number.isFinite(raw.duration) && raw.duration >= 0;
-  const timeIsValid = typeof raw.time === "number" && Number.isFinite(raw.time) && raw.time >= 0;
+  const timeIsValid = typeof raw.time === "number" && Number.isFinite(raw.time);
   const targetIsValid = raw.target === undefined || raw.target === null || isPlaybackTarget(raw.target);
   const available = raw.available === true && durationIsValid && timeIsValid && targetIsValid;
   const duration = durationIsValid ? raw.duration as number : 0;
-  const time = available ? clampTimelineTime(raw.time as number, duration) : 0;
+  const range = isFiniteTimeRange(raw.range) && raw.range.start <= raw.range.end ? raw.range : { start: 0, end: duration };
+  const time = available ? clampTimelineTime(raw.time as number, range) : 0;
   const sampledAtUnixMs = typeof raw.sampledAtUnixMs === "number" && Number.isFinite(raw.sampledAtUnixMs) && raw.sampledAtUnixMs >= 0
     ? raw.sampledAtUnixMs
     : undefined;
   const rate = available && typeof raw.rate === "number" && Number.isFinite(raw.rate) && raw.rate > 0
     ? raw.rate
     : undefined;
-  const loopRange = available && isFiniteTimeRange(raw.loopRange) ? clampTimelineLoopRange(raw.loopRange, duration) : null;
+  const loopRange = available && isFiniteTimeRange(raw.loopRange) ? clampTimelineLoopRange(raw.loopRange, range) : null;
   return {
     available,
     time,
-    duration: available ? duration : 0,
+    duration: available ? range.end - range.start : 0,
+    range,
     playing: available && raw.playing === true,
     looping: available && raw.looping === true,
     loopRange,
@@ -224,6 +264,7 @@ function samePlaybackSnapshot(left: TimelinePlaybackSnapshot, right: TimelinePla
   return left.available === right.available &&
     left.time === right.time &&
     left.duration === right.duration &&
+    left.range?.start === right.range?.start && left.range?.end === right.range?.end &&
     left.playing === right.playing &&
     left.looping === right.looping &&
     (left.rate ?? 1) === (right.rate ?? 1) &&
@@ -252,12 +293,24 @@ function roundedRect(
   context.closePath();
 }
 
+// Use Canvas-normalized host colors; the text palette remains CSS-owned.
+function lightClipText(normalized: string, colors: CanvasColors): string {
+  const hex = /^#([0-9a-f]{6})$/i.exec(normalized);
+  const rgb = hex ? [0, 2, 4].map(i => parseInt(hex[1].slice(i, i + 2), 16)) : normalized.match(/[\d.]+/g)?.slice(0, 3).map(Number);
+  if (!rgb || rgb.length !== 3) return colors["clip-text-dark"];
+  const linear = rgb.map(v => { const c = (v * .82 + 245 * .18) / 255; return c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4; });
+  return .2126 * linear[0] + .7152 * linear[1] + .0722 * linear[2] > .179 ? colors["clip-text-dark"] : colors["clip-text"];
+}
+
 function drawItem(
   context: CanvasRenderingContext2D,
   item: TimelineItem,
   rowIndex: number,
   timeToX: (time: number) => number,
   rowHeight: number,
+  visibleRange: TimeRange,
+  colors: CanvasColors,
+  light = false,
 ): void {
   const rowY = rowIndex * rowHeight;
   // Every pixel constant below was drawn for the 26px design row; scale them
@@ -265,46 +318,71 @@ function drawItem(
   // the clip band and the DOM row strip keep the same proportions.
   const s = rowHeight / TIMELINE_ROW_HEIGHT;
   if (item.kind === "clip") {
+    context.save();
+    const opacity = item.disabled ? 0.4 : 1;
     const x = timeToX(item.range.start);
     const width = Math.max(3, timeToX(item.range.end) - x);
     roundedRect(context, x + 1, rowY + 4 * s, width - 2, 18 * s, 3 * s);
-    context.globalAlpha = 0.82;
+    context.globalAlpha = 0.82 * opacity;
     context.fillStyle = item.color;
+    const clipText = light ? lightClipText(context.fillStyle, colors) : colors["clip-text"];
     context.fill();
-    context.globalAlpha = 1;
-    context.strokeStyle = item.selected ? "#f1f3ff" : "rgba(255,255,255,.16)";
+    context.globalAlpha = opacity;
+    context.strokeStyle = item.selected ? colors.selection : colors["clip-border"];
     context.lineWidth = item.selected ? 1.5 : 1;
     context.stroke();
     context.save();
     context.beginPath();
-    context.rect(x + 1, rowY + 4 * s, Math.max(0, width - 2), 18 * s);
+    context.rect(x + 7 * s, rowY + 4 * s, Math.max(0, width - 14 * s), 18 * s);
     context.clip();
     const waveform = item.waveform;
-    if (waveform && Number.isFinite(waveform.sampleDuration) && waveform.sampleDuration > 0) {
-      context.strokeStyle = "rgba(15,25,35,.7)";
+    const peaks = waveform && "peaks" in waveform ? waveform.peaks : waveform;
+    const sourceDuration = waveform && "peaks" in waveform ? waveform.sampleDuration * waveform.peaks.length : item.sourceDuration ?? (item.range.end - item.range.start);
+    if (peaks?.length && sourceDuration > 0) {
+      const scale = timeToX(1) - timeToX(0);
+      const left = Math.max(x, timeToX(visibleRange.start));
+      const right = Math.min(x + width, timeToX(visibleRange.end));
+      context.strokeStyle = colors.waveform;
       context.lineWidth = 1;
-      const step = Math.max(1, Math.ceil(waveform.peaks.length / Math.max(1, width)));
       context.beginPath();
-      for (let i = 0; i < waveform.peaks.length; i += step) {
-        const time = item.range.start + i * waveform.sampleDuration;
-        if (time >= item.range.end) break;
+      for (let px = left; px < right; px += 2) {
+        const a = Math.floor(((item.sourceOffset ?? 0) + (px - x) / scale) / sourceDuration * peaks.length);
+        const b = Math.max(a + 1, Math.ceil(((item.sourceOffset ?? 0) + (px + 2 - x) / scale) / sourceDuration * peaks.length));
         let peak = 0;
-        for (let j = i; j < Math.min(i + step, waveform.peaks.length); j++) peak = Math.max(peak, waveform.peaks[j]);
-        const px = timeToX(time);
-        const height = Math.min(1, Math.max(0, peak)) * 9 * s;
-        context.moveTo(px, rowY + 13 * s - height);
-        context.lineTo(px, rowY + 13 * s + height);
+        for (let bin = a; bin < Math.min(b, a + peaks.length); bin++) {
+          const index = item.loop ? ((bin % peaks.length) + peaks.length) % peaks.length : bin;
+          if (index >= 0 && index < peaks.length) peak = Math.max(peak, peaks[index]);
+        }
+        const amplitude = Math.min(1, peak) * 8 * s;
+        context.moveTo(px, rowY + 13 * s - amplitude);
+        context.lineTo(px, rowY + 13 * s + amplitude);
       }
       context.stroke();
     }
-    context.fillStyle = "rgba(255,255,255,.9)";
+    context.fillStyle = clipText;
     context.font = `500 ${10 * s}px Inter, Segoe UI, sans-serif`;
     context.textBaseline = "middle";
     context.fillText(item.label, x + 8 * s, rowY + 13 * s);
     context.restore();
+    const period = item.sourceDuration ?? (item.range.end - item.range.start);
+    if (item.loop && period > 0 && timeToX(period) - timeToX(0) >= 6) {
+      const offset = item.sourceOffset ?? 0;
+      const first = Math.max(1, Math.ceil((offset + Math.max(0, visibleRange.start - item.range.start)) / period));
+      const last = Math.floor((offset + Math.min(item.range.end, visibleRange.end) - item.range.start) / period);
+      context.strokeStyle = colors["clip-loop-line"];
+      for (let cycle = first; cycle <= last; cycle++) {
+        const time = item.range.start + cycle * period - offset;
+        if (time <= item.range.start || time >= item.range.end) continue;
+        const boundary = timeToX(time);
+        context.beginPath(); context.moveTo(boundary, rowY + 4 * s); context.lineTo(boundary, rowY + 22 * s); context.stroke();
+      }
+    }
+    context.restore();
     return;
   }
 
+  context.save();
+  context.globalAlpha = item.disabled ? 0.4 : 1;
   const x = timeToX(item.time);
   context.fillStyle = item.color;
   if (item.kind === "marker") {
@@ -315,6 +393,14 @@ function drawItem(
     context.lineTo(x, rowY + 11 * s);
     context.closePath();
     context.fill();
+  } else if (item.kind === "event-cue") {
+    context.beginPath();
+    context.moveTo(x, rowY + 13 * s - 4);
+    context.lineTo(x + 4, rowY + 13 * s);
+    context.lineTo(x, rowY + 13 * s + 4);
+    context.lineTo(x - 4, rowY + 13 * s);
+    context.closePath();
+    context.fill();
   } else {
     context.beginPath();
     context.moveTo(x, rowY + 6 * s);
@@ -323,12 +409,13 @@ function drawItem(
     context.lineTo(x - 6 * s, rowY + 13 * s);
     context.closePath();
     context.fill();
-    if (item.selected) { context.strokeStyle = "#fff"; context.stroke(); }
   }
-  context.fillStyle = "rgba(238,238,244,.78)";
+  if (item.selected) { context.strokeStyle = colors.selection; context.stroke(); }
+  context.fillStyle = colors["cue-label"];
   context.font = `500 ${9 * s}px Inter, Segoe UI, sans-serif`;
   context.textBaseline = "middle";
-  context.fillText(item.label, x + 9 * s, rowY + 13 * s);
+  if (item.kind !== "event-cue") context.fillText(item.label, x + 9 * s, rowY + 13 * s);
+  context.restore();
 }
 
 function drawKey(
@@ -337,6 +424,7 @@ function drawKey(
   rowIndex: number,
   timeToX: (time: number) => number,
   rowHeight: number,
+  colors: CanvasColors,
 ): void {
   const s = rowHeight / TIMELINE_ROW_HEIGHT;
   const x = timeToX(key.time);
@@ -348,9 +436,9 @@ function drawKey(
   context.lineTo(x, y + radius);
   context.lineTo(x - radius, y);
   context.closePath();
-  context.fillStyle = key.selected ? "#fff" : "rgba(230,232,255,.78)";
+  context.fillStyle = key.selected ? colors["key-selected"] : colors.key;
   context.fill();
-  context.strokeStyle = "rgba(24,24,31,.9)";
+  context.strokeStyle = colors["key-border"];
   context.lineWidth = 1;
   context.stroke();
 }
@@ -361,6 +449,7 @@ function drawKeyColumn(
   rowIndex: number,
   timeToX: (time: number) => number,
   rowHeight: number,
+  colors: CanvasColors,
 ): void {
   if (column.count <= 1) {
     drawKey(context, {
@@ -369,17 +458,20 @@ function drawKeyColumn(
       rowId: column.rowId,
       channelId: column.channelId,
       time: column.time,
-    }, rowIndex, timeToX, rowHeight);
+    }, rowIndex, timeToX, rowHeight, colors);
     return;
   }
   const x = Math.round(timeToX(column.time)) + 0.5;
   const y = rowIndex * rowHeight + 13;
-  context.strokeStyle = `rgba(230,232,255,${Math.min(1, .3 + Math.log2(column.count) / 8)})`;
+  context.save();
+  context.globalAlpha *= Math.min(1, .3 + Math.log2(column.count) / 8);
+  context.strokeStyle = colors["key-column"];
   context.lineWidth = Math.min(4, 1 + Math.log2(column.count) / 3);
   context.beginPath();
   context.moveTo(x, y - 9);
   context.lineTo(x, y + 9);
   context.stroke();
+  context.restore();
 }
 
 function dispatchSafely(
@@ -402,10 +494,19 @@ function dispatchSafely(
 
 export function TimelineEditor({
   dataSource,
+  editing: editingOptions,
   sidebar,
-  renderRowActions,
   selectedItem,
-  editing,
+  renderRowActions,
+  theme = "dark",
+  eventEditing,
+  onRenameRow,
+  onChangePlaybackRange,
+  onMoveRow,
+  onReorderRow,
+  onToggleRow,
+  initialViewState,
+  onViewStateChange,
   playbackController,
   frameRate = 24,
   displayMode: initialDisplayMode = "frames",
@@ -419,7 +520,8 @@ export function TimelineEditor({
   onPerformanceSummary,
   slots,
 }: TimelineEditorProps): ReactElement {
-  const fps = normalizeFrameRate(frameRate);
+  const itemEditing = editingOptions && "onCommit" in editingOptions ? editingOptions : undefined;
+  const editing = editingOptions && "canEditClip" in editingOptions ? editingOptions : undefined;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const sidebarId = useId();
   const [sidebarWidth, setSidebarWidth] = useState<number>();
@@ -430,6 +532,7 @@ export function TimelineEditor({
   };
   const editDrag = useRef<{ pointer: number; x: number; item: TimelineItem; mode: TimelineEditMode; revision: number; source: TimelineDataSource } | null>(null);
   const [editPreview, setEditPreview] = useState<TimelineItemEdit | null>(null);
+  const fps = normalizeFrameRate(frameRate);
   const revision = useSyncExternalStore(
     useCallback((listener) => dataSource.subscribe(listener), [dataSource]),
     useCallback(() => dataSource.getRevision(), [dataSource]),
@@ -465,29 +568,40 @@ export function TimelineEditor({
     readPlaybackSnapshot,
     readPlaybackSnapshot,
   );
-  const range = useMemo(() => safeRange(dataSource), [dataSource, revision]);
+  const dataRange = useMemo(() => safeRange(dataSource), [dataSource, revision]);
+  const [viewExtent, setViewExtent] = useState<TimeRange | null>(() => isFiniteTimeRange(initialViewState?.viewExtent) && initialViewState!.viewExtent!.end > initialViewState!.viewExtent!.start ? initialViewState!.viewExtent! : null);
+  const range = useMemo(() => ({ start: Math.min(dataRange.start, viewExtent?.start ?? dataRange.start), end: Math.max(dataRange.end, viewExtent?.end ?? dataRange.end) }), [dataRange.start, dataRange.end, viewExtent]);
+  const rangeRef = useRef(range);
+  rangeRef.current = range;
   const duration = Math.max(0, range.end - range.start);
-  const [displayMode, setDisplayMode] = useState<"frames" | "seconds">(initialDisplayMode);
+  const [playbackRangePreview, setPlaybackRangePreview] = useState<TimeRange | null>(null);
+  const playbackRange = playbackSnapshot.available ? (playbackSnapshot.range ?? dataRange) : dataRange;
+  const [displayMode, setDisplayMode] = useState<"frames" | "seconds">(initialViewState?.displayMode === "seconds" || initialViewState?.displayMode === "frames" ? initialViewState.displayMode : initialDisplayMode);
   const [scroll, setScroll] = useState({ left: 0, top: 0 });
   const [viewport, setViewport] = useState<CanvasViewport>({ width: 0, height: 0 });
   /**
    * Horizontal zoom. `null` = "fit the whole clip to the viewport" — the
    * default, re-applied whenever the clip's range changes (a new clip shows
    * in full, like UE's Sequencer). A number is a user zoom (wheel / range
-   * bar), clamped so the view never shows less than the whole clip and
-   * never more than MAX_PIXELS_PER_SECOND. See core/viewRange.ts.
+   * bar). User gestures may expand browsing bounds beyond the data without
+   * editing playback bounds. See core/viewRange.ts.
    */
-  const [zoomPixelsPerSecond, setZoomPixelsPerSecond] = useState<number | null>(null);
+  const [zoomPixelsPerSecond, setZoomPixelsPerSecond] = useState<number | null>(() => Number.isFinite(initialViewState?.pixelsPerSecond) && initialViewState!.pixelsPerSecond! > 0 ? initialViewState!.pixelsPerSecond! : null);
   const pixelsPerSecond = zoomPixelsPerSecond === null
     ? fitPixelsPerSecond(duration, viewport.width)
-    : clampPixelsPerSecond(zoomPixelsPerSecond, duration, viewport.width);
+    : clampPixelsPerSecond(zoomPixelsPerSecond, duration, viewport.width, true);
   /**
    * Vertical zoom (Ctrl+wheel): a multiplier on `--timeline-row-height`,
    * applied as `--timeline-row-zoom` on the root element. The row-height
    * probe below measures the scaled result, so the canvas and the DOM row
    * strip follow it with no further plumbing.
    */
-  const [rowZoom, setRowZoom] = useState(1);
+  const [treeWidth, setTreeWidth] = useState<number | null>(() => Number.isFinite(initialViewState?.treeWidth) && initialViewState!.treeWidth! >= 120 ? initialViewState!.treeWidth! : null);
+  const [snap, setSnap] = useState(initialViewState?.snap !== false);
+  const [rowZoom, setRowZoom] = useState(() => clampRowZoom(initialViewState?.rowZoom ?? 1));
+  const viewStateCallback = useRef(onViewStateChange);
+  useEffect(() => { viewStateCallback.current = onViewStateChange; }, [onViewStateChange]);
+  useEffect(() => { viewStateCallback.current?.({ treeWidth, pixelsPerSecond: zoomPixelsPerSecond, rowZoom, snap, displayMode, viewExtent }); }, [treeWidth, zoomPixelsPerSecond, rowZoom, snap, displayMode, viewExtent]);
   // A scrollLeft to apply after the next commit — set together with a zoom
   // change so the browser clamps it against the NEW content width, not the
   // one still in the DOM at event time.
@@ -498,7 +612,7 @@ export function TimelineEditor({
   const pendingViewRef = useRef<ViewRange | null>(null);
   const rangeBarRef = useRef<HTMLDivElement>(null);
   const rulerRef = useRef<HTMLDivElement>(null);
-  const rangeDragRef = useRef<{ pointerId: number; mode: "pan" | "start" | "end"; originX: number; view: ViewRange; thumb: ViewRangeThumb } | null>(null);
+  const rangeDragRef = useRef<{ pointerId: number; mode: "pan" | "start" | "end"; originX: number; view: ViewRange; thumb: ViewRangeThumb; range: TimeRange } | null>(null);
   const [devicePixelRatio, setDevicePixelRatio] = useState(safeDevicePixelRatio);
   const [localTime, setLocalTime] = useState(range.start);
   const [scrubbing, setScrubbing] = useState(false);
@@ -513,8 +627,11 @@ export function TimelineEditor({
   const loopPointerIdRef = useRef<number | null>(null);
   const loopDragOriginRef = useRef(range.start);
   const timelineViewportRef = useRef<HTMLDivElement>(null);
+  const panHandlers = useMiddlePan(timelineViewportRef);
   const treeViewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rootRef = useRef<HTMLElement>(null);
+  const colors = useCanvasTheme(rootRef);
   const playheadRef = useRef<HTMLDivElement>(null);
   const readoutRef = useRef<HTMLButtonElement>(null);
   const rowHeightProbeRef = useRef<HTMLDivElement>(null);
@@ -537,13 +654,17 @@ export function TimelineEditor({
   const rowHeight = measuredRowHeight > 0 ? measuredRowHeight : TIMELINE_ROW_HEIGHT;
 
   useEffect(() => {
-    setLocalTime((time) => clampTimelineTime(time, range.end));
-  }, [range.end]);
+    setLocalTime((time) => clampTimelineTime(time, playbackRange));
+    setLocalLoopRange((loop) => clampTimelineLoopRange(loop, playbackRange));
+  }, [playbackRange.start, playbackRange.end]);
 
+  const previousRange = useRef(dataRange);
+  const previousDisplayMode = useRef(initialDisplayMode);
   // A different clip (range) -> back to "fit the whole clip".
   useEffect(() => {
-    setZoomPixelsPerSecond(null);
-  }, [range.start, range.end]);
+    if (previousRange.current.start !== dataRange.start || previousRange.current.end !== dataRange.end) { setZoomPixelsPerSecond(null); setViewExtent(null); }
+    previousRange.current = dataRange;
+  }, [dataRange.start, dataRange.end]);
 
   useLayoutEffect(() => {
     pendingViewRef.current = null;
@@ -555,7 +676,8 @@ export function TimelineEditor({
   });
 
   useEffect(() => {
-    setDisplayMode(initialDisplayMode);
+    if (previousDisplayMode.current !== initialDisplayMode) setDisplayMode(initialDisplayMode);
+    previousDisplayMode.current = initialDisplayMode;
   }, [initialDisplayMode]);
 
   useEffect(() => {
@@ -630,16 +752,18 @@ export function TimelineEditor({
     }
     return targets;
   }, [dataSource, revision, rows]);
+  const clipEditing = useClipEditing({ editing, dataSource, viewport: timelineViewportRef, scale: pixelsPerSecond, rowHeight, range, fps, displayMode, snap, scrollLeft: scroll.left, width: viewport.width });
+  const editableClips = editing ? dataSource.getItems(visibleQuery).filter(item => item.kind === "clip" && editing.canEditClip(item)) : [];
   const commandTarget = resolveTimelinePlaybackTarget(selectedTarget, playbackSnapshot);
   const loopRange = canTransport ? (playbackSnapshot.loopRange ?? null) : localLoopRange;
 
   const updateReadout = useCallback((nextTime: number) => {
     if (readoutRef.current) {
       readoutRef.current.textContent = variant === "compact"
-        ? formatCompactTimelineReadout(nextTime - range.start, duration, displayMode, fps)
-        : formatTimelineReadout(nextTime - range.start, duration, displayMode, fps);
+        ? formatCompactTimelineReadout(nextTime, playbackRange, displayMode, fps)
+        : formatTimelineReadout(nextTime, playbackRange, displayMode, fps);
     }
-  }, [displayMode, duration, fps, range.start, variant]);
+  }, [displayMode, fps, playbackRange.start, playbackRange.end, variant]);
 
   const updatePlayhead = useCallback((nextTime: number) => {
     const x = (nextTime - range.start) * pixelsPerSecond - scroll.left;
@@ -665,7 +789,7 @@ export function TimelineEditor({
     if (!element) return;
     const next = resolveTimelineSeekTime(
       range.start + (clientX - element.getBoundingClientRect().left + element.scrollLeft) / pixelsPerSecond,
-      range.end,
+      playbackRange,
       "frame-snap",
       fps,
     );
@@ -678,7 +802,7 @@ export function TimelineEditor({
     if (playbackController && playbackSnapshot.available) {
       dispatchSafely(playbackController, { type: "seek", time: next, target: commandTarget }, onDiagnostic);
     }
-  }, [commandTarget, fps, onDiagnostic, pixelsPerSecond, playbackController, playbackSnapshot.available, range.end, range.start, updatePlayhead]);
+  }, [commandTarget, fps, onDiagnostic, pixelsPerSecond, playbackController, playbackSnapshot.available, range.start, playbackRange, updatePlayhead]);
 
   const hitItem = useCallback((clientX: number, clientY: number) => {
     const element = timelineViewportRef.current;
@@ -696,7 +820,7 @@ export function TimelineEditor({
 
   const onPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
-    if (editing && event.currentTarget === timelineViewportRef.current) {
+    if (itemEditing && event.currentTarget === timelineViewportRef.current) {
       const element = event.currentTarget;
       const item = hitItem(event.clientX, event.clientY);
       const box = element.getBoundingClientRect();
@@ -709,11 +833,12 @@ export function TimelineEditor({
         editDrag.current = { pointer: event.pointerId, x: event.clientX, item, mode, revision, source: dataSource };
         element.setPointerCapture(event.pointerId);
         element.focus();
-        editing.onSelect?.(item);
-        editing.onStart?.();
+        itemEditing.onSelect?.(item);
+        itemEditing.onStart?.();
         return;
       }
     }
+    timelineViewportRef.current?.focus();
     pointerIdRef.current = event.pointerId;
     scrubOriginRef.current = time;
     scrubPreviewRef.current = time;
@@ -724,7 +849,7 @@ export function TimelineEditor({
       dispatchSafely(playbackController, { type: "pause", target: commandTarget }, onDiagnostic);
     }
     seekFromClientX(event.clientX);
-  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, playbackSnapshot.playing, seekFromClientX, time, editing, hitItem, dataSource, pixelsPerSecond, range.start, rowHeight, revision]);
+  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, playbackSnapshot.playing, seekFromClientX, time, itemEditing, hitItem, dataSource, pixelsPerSecond, range.start, revision]);
 
   const onPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = editDrag.current;
@@ -733,6 +858,7 @@ export function TimelineEditor({
       catch (error) { onDiagnostic?.({ level: "error", source: "timeline", message: "Cannot edit item", error }); }
       return;
     }
+
     if (pointerIdRef.current !== event.pointerId) return;
     seekFromClientX(event.clientX);
   }, [seekFromClientX, pixelsPerSecond, range, fps, onDiagnostic]);
@@ -743,12 +869,13 @@ export function TimelineEditor({
       editDrag.current = null;
       setEditPreview(null);
       if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-      if (!cancelled && editing && dataSource === drag.source && revision === drag.revision && Math.abs(event.clientX - drag.x) > 2) {
-        try { editing.onCommit(proposeTimelineItemEdit(drag.item, drag.mode, (event.clientX - drag.x) / pixelsPerSecond, range, fps)); }
+      if (!cancelled && itemEditing && dataSource === drag.source && revision === drag.revision && Math.abs(event.clientX - drag.x) > 2) {
+        try { itemEditing.onCommit(proposeTimelineItemEdit(drag.item, drag.mode, (event.clientX - drag.x) / pixelsPerSecond, range, fps)); }
         catch (error) { onDiagnostic?.({ level: "error", source: "timeline", message: "Item edit rejected", error }); }
       }
       return;
     }
+
     if (pointerIdRef.current !== event.pointerId) return;
     if (cancelled) {
       const origin = scrubOriginRef.current;
@@ -768,65 +895,77 @@ export function TimelineEditor({
     pointerIdRef.current = null;
     setScrubbing(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, updatePlayhead, editing, dataSource, revision, pixelsPerSecond, range, fps]);
+  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, updatePlayhead, itemEditing, dataSource, revision, pixelsPerSecond, range, fps]);
 
   /** Seek transport (skip-to-start/end, frame step) shares scrub's dispatch-or-local-set split. */
   const seekTo = useCallback((nextTime: number) => {
-    const clamped = resolveTimelineSeekTime(nextTime, range.end, "frame-snap", fps);
+    const clamped = resolveTimelineSeekTime(nextTime, playbackRange, "frame-snap", fps);
     if (playbackController && playbackSnapshot.available) {
       dispatchSafely(playbackController, { type: "seek", time: clamped, target: commandTarget }, onDiagnostic);
     } else if (!playbackController) {
       setLocalTime(clamped);
     }
-  }, [commandTarget, fps, onDiagnostic, playbackController, playbackSnapshot.available, range.end]);
+  }, [commandTarget, fps, onDiagnostic, playbackController, playbackSnapshot.available, playbackRange]);
 
   const stepFrame = useCallback((direction: -1 | 1) => {
-    const stepped = resolveTimelineSeekTime(time + direction / fps, range.end, "frame-snap", fps);
+    const stepped = resolveTimelineSeekTime(time + direction / fps, playbackRange, "frame-snap", fps);
     seekTo(stepped);
-  }, [fps, range.end, seekTo, time]);
+  }, [fps, playbackRange, seekTo, time]);
 
   /**
    * ArrowLeft/ArrowRight step the playhead one frame while the timeline has
    * focus. Bound only to the track viewport (not window/document), so typing
    * arrow keys in an unrelated input elsewhere in the host app is untouched.
    */
-  const onViewportKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+  const onViewportKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape" && editDrag.current) {
       const pointer = editDrag.current.pointer;
       editDrag.current = null;
       setEditPreview(null);
-      if (event.currentTarget.hasPointerCapture(pointer)) event.currentTarget.releasePointerCapture(pointer);
+      if (timelineViewportRef.current?.hasPointerCapture(pointer)) timelineViewportRef.current?.releasePointerCapture(pointer);
       event.preventDefault();
       return;
     }
-    if (duration <= 0) return;
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      stepFrame(-1);
-    } else if (event.key === "ArrowRight") {
-      event.preventDefault();
-      stepFrame(1);
+    const target = event.target as HTMLElement;
+    if (target.closest(".timeline-editor__event-cue") && (event.ctrlKey || event.metaKey) && ["z", "y"].includes(event.key.toLowerCase())) {
+      clipEditing.onKeyDown(event);
+      return;
     }
-  }, [duration, stepFrame]);
+    if (target.closest(".timeline-editor__inspector, .timeline-editor__sidebar") || target.isContentEditable || target.closest("input, textarea, select, button") || event.defaultPrevented) return;
+    if (clipEditing.onKeyDown(event)) return;
+    if (duration <= 0 || event.altKey || event.metaKey) return;
+    const key = event.key.toLowerCase();
+    const transport = (type: "play" | "pause") => dispatchSafely(playbackController, { type, target: commandTarget }, onDiagnostic);
+    if (event.ctrlKey && key !== "arrowup") return;
+    if (key === " ") { if (!event.repeat) transport(playbackSnapshot.playing ? "pause" : "play"); }
+    else if (key === "arrowdown") transport("play");
+    else if (key === "k") transport("pause");
+    else if (key === "arrowup") seekTo(event.ctrlKey ? playbackRange.end : playbackRange.start);
+    else if (key === "arrowleft" && !event.ctrlKey) stepFrame(-1);
+    else if (key === "arrowright" && !event.ctrlKey) stepFrame(1);
+    else if (key === "home") { setViewExtent(null); setZoomPixelsPerSecond(null); if (timelineViewportRef.current) timelineViewportRef.current.scrollLeft = 0; }
+    else return;
+    event.preventDefault();
+  };
 
   const dispatchLoopRange = useCallback((next: TimeRange | null) => {
     if (playbackController && playbackSnapshot.available) {
       dispatchSafely(playbackController, { type: "setLoopRange", range: next, target: commandTarget }, onDiagnostic);
     } else if (!playbackController) {
-      setLocalLoopRange(clampTimelineLoopRange(next, duration));
+      setLocalLoopRange(clampTimelineLoopRange(next, playbackRange));
     }
-  }, [commandTarget, duration, onDiagnostic, playbackController, playbackSnapshot.available]);
+  }, [commandTarget, playbackRange, onDiagnostic, playbackController, playbackSnapshot.available]);
 
   const loopTimeFromClientX = useCallback((clientX: number) => {
     const element = timelineViewportRef.current;
-    if (!element) return range.start;
+    if (!element) return playbackRange.start;
     return resolveTimelineSeekTime(
       range.start + (clientX - element.getBoundingClientRect().left + element.scrollLeft) / pixelsPerSecond,
-      range.end,
+      playbackRange,
       "frame-snap",
       fps,
     );
-  }, [fps, pixelsPerSecond, range.end, range.start]);
+  }, [fps, pixelsPerSecond, range.start, playbackRange]);
 
   const onLoopLanePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -850,10 +989,10 @@ export function TimelineEditor({
     loopPointerIdRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     setLoopDragPreview((preview) => {
-      if (preview) dispatchLoopRange(clampTimelineLoopRange(preview, duration));
+      if (preview) dispatchLoopRange(clampTimelineLoopRange(preview, playbackRange));
       return null;
     });
-  }, [dispatchLoopRange, duration]);
+  }, [dispatchLoopRange, playbackRange]);
 
   const clearLoopRange = useCallback((event: { stopPropagation(): void }) => {
     event.stopPropagation();
@@ -867,7 +1006,14 @@ export function TimelineEditor({
    * `pendingScrollLeftRef`); the resulting scroll event then re-reads the
    * same value.
    */
-  const applyView = useCallback((next: ViewRange) => {
+  const applyView = useCallback((desired: ViewRange) => {
+    const current = rangeRef.current;
+    const width = timelineViewportRef.current?.clientWidth ?? 0;
+    const start = Math.min(current.start, current.start + desired.scrollLeft / desired.pixelsPerSecond);
+    const end = Math.max(current.end, current.start + (desired.scrollLeft + width) / desired.pixelsPerSecond);
+    const next = { ...desired, scrollLeft: desired.scrollLeft + (current.start - start) * desired.pixelsPerSecond };
+    rangeRef.current = { start, end };
+    setViewExtent({ start, end });
     pendingViewRef.current = next;
     setZoomPixelsPerSecond(next.pixelsPerSecond);
     pendingScrollLeftRef.current = next.scrollLeft;
@@ -904,7 +1050,7 @@ export function TimelineEditor({
         event.preventDefault();
         const raw = event.shiftKey ? (event.deltaY || event.deltaX) : event.deltaX;
         const delta = event.deltaMode === 1 ? raw * 16 : event.deltaMode === 2 ? raw * width : raw;
-        applyView({ pixelsPerSecond: pps, scrollLeft: clampScrollLeft(base.scrollLeft + delta, clipDuration, pps, width) });
+        applyView({ pixelsPerSecond: pps, scrollLeft: base.scrollLeft + delta });
         return;
       }
       if (event.deltaY === 0) return;
@@ -916,6 +1062,7 @@ export function TimelineEditor({
         anchorX,
         clipDuration,
         width,
+        true,
       ));
     };
     const rulerElement = rulerRef.current;
@@ -958,7 +1105,7 @@ export function TimelineEditor({
       startView = panViewByFraction(view, centre - half - current.start, clipDuration, width);
       applyView(startView);
     }
-    rangeDragRef.current = { pointerId: event.pointerId, mode, originX: event.clientX, view: startView, thumb: viewRangeThumb(startView, clipDuration, width) };
+    rangeDragRef.current = { pointerId: event.pointerId, mode, originX: event.clientX, view: startView, thumb: viewRangeThumb(startView, clipDuration, width), range: { ...rangeRef.current } };
     bar.setPointerCapture(event.pointerId);
     event.preventDefault();
   }, [applyView, rangeBarFraction, scroll.left]);
@@ -968,16 +1115,19 @@ export function TimelineEditor({
     if (!drag || drag.pointerId !== event.pointerId) return;
     const bar = event.currentTarget.getBoundingClientRect();
     if (bar.width <= 0) return;
-    const { duration: clipDuration, width } = viewRef.current;
+    const { width } = viewRef.current;
     const dx = (event.clientX - drag.originX) / bar.width;
+    const dragDuration = drag.range.end - drag.range.start;
+    const applyDrag = (view: ViewRange) => applyView({ ...view, scrollLeft: view.scrollLeft + (drag.range.start - rangeRef.current.start) * view.pixelsPerSecond });
     if (drag.mode === "pan") {
-      applyView(panViewByFraction(drag.view, dx, clipDuration, width));
+      const full = drag.thumb.end - drag.thumb.start >= 1 - 1e-6;
+      applyDrag({ ...drag.view, scrollLeft: drag.view.scrollLeft + dx * dragDuration * drag.view.pixelsPerSecond * (full ? -1 : 1) });
       return;
     }
     const next: ViewRangeThumb = drag.mode === "start"
       ? { start: drag.thumb.start + dx, end: drag.thumb.end }
       : { start: drag.thumb.start, end: drag.thumb.end + dx };
-    applyView(viewRangeFromThumb(next, clipDuration, width, drag.mode === "start" ? "end" : "start"));
+    applyDrag(viewRangeFromThumb(next, dragDuration, width, drag.mode === "start" ? "end" : "start", true));
   }, [applyView]);
 
   const onRangeBarPointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
@@ -999,6 +1149,8 @@ export function TimelineEditor({
   }, [applyView, scroll.left]);
 
   const fitView = useCallback(() => {
+    setViewExtent(null);
+    pendingViewRef.current = null;
     setZoomPixelsPerSecond(null);
     pendingScrollLeftRef.current = 0;
     setScroll((current) => (current.left === 0 ? current : { ...current, left: 0 }));
@@ -1022,7 +1174,7 @@ export function TimelineEditor({
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || viewport.width <= 0 || viewport.height <= 0) return;
+    if (!canvas || !colors || viewport.width <= 0 || viewport.height <= 0) return;
     const startedAt = performance.now();
     const dpr = devicePixelRatio;
     canvas.width = Math.max(1, Math.round(viewport.width * dpr));
@@ -1048,9 +1200,9 @@ export function TimelineEditor({
       const row = rows[index - rowQuery.start];
       if (!row) continue;
       const y = index * rowHeight;
-      context.fillStyle = row.kind === "group" ? "#22242d" : index % 2 === 0 ? "#1c1e25" : "#191b21";
+      context.fillStyle = row.kind === "group" ? colors["row-group"] : index % 2 === 0 ? colors["row-even"] : colors["row-odd"];
       context.fillRect(scroll.left, y, viewport.width, rowHeight);
-      context.strokeStyle = "rgba(255,255,255,.055)";
+      context.strokeStyle = colors["row-divider"];
       context.beginPath();
       context.moveTo(scroll.left, y + rowHeight - .5);
       context.lineTo(scroll.left + viewport.width, y + rowHeight - .5);
@@ -1061,14 +1213,14 @@ export function TimelineEditor({
     // brighter so the rhythm stays readable. Iterated by index (not by
     // accumulating a float step) so frame lines land exactly on frames.
     const { gridStep, frameGrid } = timelineGridSteps(pixelsPerSecond, fps);
-    const firstIndex = Math.max(0, Math.floor((visibleTimeRange.start - range.start) / gridStep));
-    const lastIndex = Math.ceil((Math.min(range.end, visibleTimeRange.end) - range.start) / gridStep);
+    const firstIndex = Math.ceil(visibleTimeRange.start / gridStep);
+    const lastIndex = Math.floor(Math.min(range.end, visibleTimeRange.end) / gridStep);
     const transform = createViewTransform(range.start, pixelsPerSecond);
     for (let index = firstIndex; index <= lastIndex; index += 1) {
-      const gridTime = range.start + index * gridStep;
+      const gridTime = index * gridStep;
       const x = Math.round(transform.timeToX(gridTime)) + .5;
       const onSecond = Math.abs(gridTime - Math.round(gridTime)) < gridStep * .01;
-      context.strokeStyle = onSecond ? "rgba(255,255,255,.16)" : frameGrid ? "rgba(255,255,255,.085)" : "rgba(255,255,255,.045)";
+      context.strokeStyle = onSecond ? colors["grid-major"] : frameGrid ? colors["grid-frame"] : colors["grid-minor"];
       context.beginPath();
       context.moveTo(x, scroll.top);
       context.lineTo(x, scroll.top + viewport.height);
@@ -1084,17 +1236,19 @@ export function TimelineEditor({
     const clippedRows = new Set(rowIds);
     for (const item of items) {
       const rowIndex = rowIndexById.get(item.rowId);
-      if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, selectedItem ? { ...item, selected: item.id === selectedItem.id && item.kind === selectedItem.kind } : item, rowIndex, transform.timeToX, rowHeight);
+      if (item.kind === "clip" && editing?.canEditClip(item)) continue;
+      if (item.kind === "event-cue" && eventEditing?.canEdit(item)) continue;
+      if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, selectedItem ? { ...item, selected: item.id === selectedItem.id && item.kind === selectedItem.kind } : item, rowIndex, transform.timeToX, rowHeight, visibleTimeRange, colors, theme === "light");
     }
     if (columns.length > 0) {
       for (const column of columns) {
         const rowIndex = rowIndexById.get(column.rowId);
-        if (rowIndex != null) drawKeyColumn(context, column, rowIndex, transform.timeToX, rowHeight);
+        if (rowIndex != null) drawKeyColumn(context, column, rowIndex, transform.timeToX, rowHeight, colors);
       }
     } else {
       for (const key of keys) {
         const rowIndex = rowIndexById.get(key.rowId);
-        if (rowIndex != null) drawKey(context, key, rowIndex, transform.timeToX, rowHeight);
+        if (rowIndex != null) drawKey(context, key, rowIndex, transform.timeToX, rowHeight, colors);
       }
     }
     context.restore();
@@ -1106,7 +1260,7 @@ export function TimelineEditor({
       keysPainted: columns.length > 0 ? columns.length : keys.length,
       devicePixelRatio: dpr,
     });
-  }, [selectedItem?.id, selectedItem?.kind, editPreview, dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
+  }, [colors, theme, selectedItem?.id, selectedItem?.kind, editPreview, editing, eventEditing, dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
 
   // Tick labels use a monospace font. Measuring a fixed sample tracks host font
   // size changes without coupling label layout to whichever ticks were rendered.
@@ -1115,16 +1269,16 @@ export function TimelineEditor({
     formatTimelineTick(visibleTimeRange.end, displayMode, fps).length,
   ) * tickCharacterWidth;
   const ticks = visibleTimelineTicks(
-    range.end - range.start,
+    range,
     scroll.left,
     viewport.width,
     pixelsPerSecond,
     timelineRulerStep(timelineGridSteps(pixelsPerSecond, fps).labelStep, pixelsPerSecond, tickLabelWidth),
-  ).filter((tick) => tick * pixelsPerSecond >= scroll.left && tick * pixelsPerSecond <= scroll.left + viewport.width);
+  ).filter((tick) => (tick - range.start) * pixelsPerSecond >= scroll.left && (tick - range.start) * pixelsPerSecond <= scroll.left + viewport.width);
   const playbackReadout = variant === "compact"
-    ? formatCompactTimelineReadout(time - range.start, duration, displayMode, fps)
-    : formatTimelineReadout(time - range.start, duration, displayMode, fps);
-  const rootClassName = ["timeline-editor", `timeline-editor--${variant}`, scrubbing ? "is-scrubbing" : "", className ?? ""].filter(Boolean).join(" ");
+    ? formatCompactTimelineReadout(time, playbackRange, displayMode, fps)
+    : formatTimelineReadout(time, playbackRange, displayMode, fps);
+  const rootClassName = ["timeline-editor", `timeline-editor--${variant}`, scrubbing ? "is-scrubbing" : "", slots?.inspector ? "has-inspector" : "", className ?? ""].filter(Boolean).join(" ");
 
   type UntargetedPlaybackCommand =
     | { type: "play" }
@@ -1143,7 +1297,7 @@ export function TimelineEditor({
   } : undefined;
 
   return (
-    <section className={`${rootClassName}${sidebar ? " timeline-editor--with-sidebar" : ""}`} aria-label="Timeline editor" style={{ "--timeline-row-zoom": rowZoom } as CSSProperties}>
+    <section ref={rootRef} data-view-start={range.start} data-view-end={range.end} onKeyDown={onViewportKeyDown} className={`${rootClassName}${sidebar ? " timeline-editor--with-sidebar" : ""}`} data-theme={theme} aria-label="Timeline editor" style={{ "--timeline-row-zoom": rowZoom, ...(treeWidth === null ? {} : { "--timeline-tree-width": `min(${treeWidth}px, max(120px, calc(100% - 160px)))` }) } as CSSProperties}>
       <div ref={rowHeightProbeRef} className="timeline-editor__row-height-probe" aria-hidden="true" />
       <header className="timeline-editor__header">
         <div className="timeline-editor__toolbar">
@@ -1154,31 +1308,32 @@ export function TimelineEditor({
           )}
           <div className="timeline-editor__slot">{slots?.toolbarStart}</div>
           <div className="timeline-editor__transport" role="group" aria-label="Playback controls">
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} aria-label="Skip to start" onClick={() => seekTo(range.start)}><SkipPreviousIcon /></button>
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} aria-label="Previous frame" onClick={() => stepFrame(-1)}><NavigateBeforeIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Skip to start (Up)" aria-label="Skip to start" onClick={() => seekTo(playbackRange.start)}><SkipPreviousIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Previous frame (Left)" aria-label="Previous frame" onClick={() => stepFrame(-1)}><NavigateBeforeIcon /></button>
             <button
               type="button"
               className="timeline-editor__button"
               disabled={!canTransport}
+              title="Play / Pause (Space)"
               aria-label={playbackSnapshot.playing ? "Pause" : "Play"}
               onClick={() => dispatchTransport(playbackSnapshot.playing ? { type: "pause" } : { type: "play" })}
             >
               {playbackSnapshot.playing ? <PauseIcon /> : <PlayIcon />}
             </button>
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} aria-label="Next frame" onClick={() => stepFrame(1)}><NavigateNextIcon /></button>
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} aria-label="Skip to end" onClick={() => seekTo(range.end)}><SkipNextIcon /></button>
-            <button type="button" className={`timeline-editor__button${playbackSnapshot.looping ? " is-active" : ""}`} disabled={!canTransport} aria-label="Loop" onClick={() => dispatchTransport({ type: "setLooping", looping: !playbackSnapshot.looping })}><RepeatIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Next frame (Right)" aria-label="Next frame" onClick={() => stepFrame(1)}><NavigateNextIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Skip to end (Ctrl+Up)" aria-label="Skip to end" onClick={() => seekTo(playbackRange.end)}><SkipNextIcon /></button>
+            <button type="button" className={`timeline-editor__button${playbackSnapshot.looping ? " is-active" : ""}`} disabled={!canTransport} title="Toggle loop playback" aria-label="Loop" onClick={() => dispatchTransport({ type: "setLooping", looping: !playbackSnapshot.looping })}><RepeatIcon /></button>
             <button
               type="button"
               className={`timeline-editor__button timeline-editor__button--rate${playbackRate !== 1 ? " is-active" : ""}`}
               disabled={!canTransport}
-              aria-label="Playback rate"
+              title="Cycle playback rate" aria-label="Playback rate"
               onClick={() => dispatchTransport({ type: "setRate", rate: nextTimelineRate(playbackRate) })}
             >
               {formatTimelineRate(playbackRate)}
             </button>
           </div>
-          <button ref={readoutRef} type="button" className="timeline-editor__readout" onClick={() => setDisplayMode((mode) => mode === "frames" ? "seconds" : "frames")} aria-label="Toggle time display">{playbackReadout}</button>
+          <button ref={readoutRef} type="button" className="timeline-editor__readout" onClick={() => setDisplayMode((mode) => mode === "frames" ? "seconds" : "frames")} title="Switch frames / seconds" aria-label="Toggle time display">{playbackReadout}</button>
           {frameRateOptions ? (
             <select
               className="timeline-editor__fps timeline-editor__fps-select"
@@ -1191,17 +1346,22 @@ export function TimelineEditor({
           ) : (
             <span className="timeline-editor__fps">{fps} fps</span>
           )}
-          <div className="timeline-editor__slot timeline-editor__slot--end">{slots?.toolbarEnd}</div>
-          {sidebar && <button type="button" className="timeline-editor__button timeline-editor__sidebar-toggle" aria-label={`Toggle ${sidebar.title}`} aria-expanded={sidebarOpen} aria-controls={sidebarId} onClick={() => setSidebarOpen(open => !open)} title={sidebar.title}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16M17 8h2M17 12h2M17 16h2"/></svg></button>}
+          {editing && <button type="button" className="timeline-editor__button timeline-editor__button--text" aria-label="Snap to frames" aria-pressed={snap} title="Snap to frames · Alt-drag to bypass" onClick={() => setSnap(!snap)}>Snap</button>}
+          <div className="timeline-editor__slot timeline-editor__slot--end">{slots?.toolbarEnd}
+            {sidebar && <button type="button" className="timeline-editor__button timeline-editor__sidebar-toggle" aria-label={`Toggle ${sidebar.title}`} title={`Toggle ${sidebar.title}`} aria-controls={sidebarId} aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(open => !open)}>{sidebar.title}</button>}
+          </div>
         </div>
       </header>
       <div className="timeline-editor__body">
-        <div className="timeline-editor__tree-heading">TRACKS</div>
+        <TrackDivider onResize={setTreeWidth} />
+        <div className="timeline-editor__tree-heading" title={onMoveRow ? "Drop a track here to remove it from its group" : undefined}
+          onDragOver={event => { if (onMoveRow && event.dataTransfer.types.includes("application/x-timeline-row")) event.preventDefault(); }}
+          onDrop={event => { const id = event.dataTransfer.getData("application/x-timeline-row"); if (onMoveRow && id) { event.preventDefault(); onMoveRow(id as TimelineRow["id"], null); } }}><span>TRACKS</span><div className="timeline-editor__slot">{slots?.tracksHeaderEnd}</div></div>
         <div className="timeline-editor__tree-viewport" ref={treeViewportRef} onScroll={onTreeScroll}>
           <div className="timeline-editor__tree-content" style={{ height: totalHeight }}>
             {rows.map((row, index) => {
               const target = rowTargets.get(row.id);
-              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} rowHeight={rowHeight} actions={renderRowActions?.(row)} />;
+              return <TimelineRowView key={row.id} row={row} index={rowQuery.start + index} target={target} selected={Boolean(target && timelinePlaybackTargetEquals(target, selectedTarget))} onSelect={setSelectedTarget} rowHeight={rowHeight} icon={slots?.rowIcon?.(row)} actions={slots?.rowActions?.(row) ?? (renderRowActions && <span className="timeline-editor__track-actions">{renderRowActions(row)}</span>)} onRename={onRenameRow} onMove={onMoveRow} onReorder={onReorderRow} onToggle={onToggleRow} />;
             })}
             {rowCount === 0 && <div className="timeline-editor__empty">{slots?.emptyState ?? "No timeline tracks"}</div>}
           </div>
@@ -1212,7 +1372,7 @@ export function TimelineEditor({
           span both — the playhead extends up through the ruler, and the
           loop band highlights the same horizontal span in both rows.
         */}
-        <div className="timeline-editor__ruler-and-tracks">
+        <div className="timeline-editor__ruler-and-tracks" {...panHandlers}>
           <div
             className="timeline-editor__ruler"
             ref={rulerRef}
@@ -1221,10 +1381,10 @@ export function TimelineEditor({
             onPointerMove={onPointerMove}
             onPointerUp={(event) => finishScrub(event, false)}
             onPointerCancel={(event) => finishScrub(event, true)}
-            onLostPointerCapture={(event) => { if (editDrag.current) finishScrub(event, true); }}
           >
+            {canTransport && onChangePlaybackRange && <PlaybackRangeHandles range={playbackRangePreview ?? playbackRange} viewStart={range.start} scale={pixelsPerSecond} scrollLeft={scroll.left} width={viewport.width} fps={fps} displayMode={displayMode} onPreview={setPlaybackRangePreview} onChange={onChangePlaybackRange} />}
             <span ref={tickWidthProbeRef} className="timeline-editor__tick timeline-editor__tick--measure" aria-hidden="true">00000000</span>
-            {ticks.map((tick) => <span className="timeline-editor__tick" key={tick} style={{ left: `${Math.max(tickLabelWidth / 2, Math.min(viewport.width - tickLabelWidth / 2, (tick * pixelsPerSecond) - scroll.left))}px` }}>{formatTimelineTick(tick + range.start, displayMode, fps)}</span>)}
+            {ticks.map((tick) => <span className="timeline-editor__tick" key={tick} style={{ left: `${Math.max(tickLabelWidth / 2, Math.min(viewport.width - tickLabelWidth / 2, ((tick - range.start) * pixelsPerSecond) - scroll.left))}px` }}>{formatTimelineTick(tick, displayMode, fps)}</span>)}
             <div
               className="timeline-editor__loop-lane"
               aria-label="Loop range"
@@ -1242,27 +1402,28 @@ export function TimelineEditor({
             tabIndex={0}
             role="application"
             aria-label="Timeline scrubber"
-            onDoubleClick={event => {
-              const item = hitItem(event.clientX, event.clientY);
-              if (item && sidebar) { editing?.onSelect?.(item); setSidebarOpen(true); }
-            }}
+            onDoubleClick={event => { const item = hitItem(event.clientX, event.clientY); if (item && sidebar) { itemEditing?.onSelect?.(item); setSidebarOpen(true); } }}
+            onLostPointerCapture={event => { if (editDrag.current) finishScrub(event, true); }}
             onScroll={onScroll}
-            onKeyDown={onViewportKeyDown}
+            {...clipEditing.handlers}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={(event) => finishScrub(event, false)}
             onPointerCancel={(event) => finishScrub(event, true)}
-            onLostPointerCapture={(event) => { if (editDrag.current) finishScrub(event, true); }}
             onPointerLeave={(event) => { if (pointerIdRef.current === event.pointerId && !event.currentTarget.hasPointerCapture(event.pointerId)) finishScrub(event, true); }}
           >
             <div className="timeline-editor__content" style={{ width: totalWidth, height: totalHeight }} />
             <canvas className="timeline-editor__canvas" ref={canvasRef} />
+            {editableClips.map(clip => clip.kind === "clip" ? clipEditing.renderClip(clip, rowQuery.start + rows.findIndex(row => row.id === clip.rowId)) : null)}
+            {eventEditing && dataSource.getItems(visibleQuery).map(item => item.kind === "event-cue" && eventEditing.canEdit(item) ? <EventCue key={item.id} cue={item} editing={eventEditing} rowIndex={rowQuery.start + rows.findIndex(row => row.id === item.rowId)} rowHeight={rowHeight} scale={pixelsPerSecond} range={range} fps={fps} snap={snap} displayMode={displayMode} /> : null)}
+            {clipEditing.indicator}
+            {canTransport && [(playbackRangePreview ?? playbackRange).start, (playbackRangePreview ?? playbackRange).end].map((boundary, index) => <div key={index} className={`timeline-editor__playback-boundary timeline-editor__playback-boundary--${index === 0 ? "start" : "end"}`} title={index === 0 ? "Playback start" : "Playback end"} style={{ left: (boundary - range.start) * pixelsPerSecond, height: Math.max(totalHeight, viewport.height) }} />)}
             <div className="timeline-editor__range-action">{slots?.diagnosticAction}</div>
           </div>
           {loopRangeStyle && (
             <div className="timeline-editor__loop-region" style={loopRangeStyle}>
               {!loopDragPreview && (
-                <button type="button" className="timeline-editor__loop-clear" aria-label="Clear loop range" onClick={clearLoopRange}>×</button>
+                <button type="button" className="timeline-editor__loop-clear" title="Clear loop range" aria-label="Clear loop range" onClick={clearLoopRange}>×</button>
               )}
             </div>
           )}
@@ -1303,6 +1464,7 @@ export function TimelineEditor({
           </div>
         </div>
       </div>
+      {slots?.inspector && <div className="timeline-editor__inspector">{slots.inspector}</div>}
       {sidebar && <aside id={sidebarId} hidden={!sidebarOpen} className="timeline-editor__sidebar" aria-label={sidebar.title} style={sidebarWidth === undefined ? undefined : { width: `min(${sidebarWidth}px, 100%)` }}>
         <div className="timeline-editor__sidebar-resizer" role="separator" aria-label={`Resize ${sidebar.title}`} aria-orientation="vertical" tabIndex={0}
           onPointerDown={event => {
@@ -1326,7 +1488,7 @@ export function TimelineEditor({
             event.preventDefault();
             resizeSidebar(event.currentTarget, event.currentTarget.parentElement!.getBoundingClientRect().width + (event.key === "ArrowLeft" ? 16 : -16));
           }} />
-        <div className="timeline-editor__sidebar-heading"><h2 className="timeline-editor__sidebar-title">{sidebar.title}</h2><button type="button" className="timeline-editor__button" aria-label={`Close ${sidebar.title}`} onClick={() => setSidebarOpen(false)}>×</button></div>
+        <div className="timeline-editor__sidebar-heading"><h2 className="timeline-editor__sidebar-title">{sidebar.title}</h2><button type="button" className="timeline-editor__button" aria-label={`Close ${sidebar.title}`} title={`Close ${sidebar.title}`} onClick={() => setSidebarOpen(false)}>×</button></div>
         <div className="timeline-editor__sidebar-content">{sidebar.content}</div>
       </aside>}
     </section>
@@ -1334,29 +1496,48 @@ export function TimelineEditor({
 }
 
 function TimelineRowView({
-  actions,
   row,
   index,
   target,
   selected,
   onSelect,
   rowHeight,
+  actions,
+  icon,
+  onMove,
+  onReorder,
+  onToggle,
+  onRename,
 }: {
-  actions?: ReactNode;
   row: TimelineRow;
   index: number;
   target?: TimelinePlaybackTarget;
   selected: boolean;
   onSelect: (target: TimelinePlaybackTarget) => void;
   rowHeight: number;
+  actions?: ReactNode;
+  icon?: ReactNode;
+  onReorder?: TimelineEditorProps["onReorderRow"];
+  onMove?: (rowId: TimelineRow["id"], parentId: TimelineRow["id"] | null) => void;
+  onToggle?: (rowId: TimelineRow["id"]) => void;
+  onRename?: (rowId: TimelineRow["id"], label: string) => void;
 }): ReactElement {
+  const [dropPosition, setDropPosition] = useState<"before" | "after" | "inside" | null>(null);
+  const placement = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes("application/x-timeline-row") || row.locked) return null;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const fraction = (event.clientY - rect.top) / rect.height;
+    if (row.kind === "group" && onMove && (!onReorder || (fraction > 0.25 && fraction < 0.75))) return "inside";
+    return onReorder ? (fraction < 0.5 ? "before" : "after") : null;
+  };
   const targetProps = target ? {
     role: "button" as const,
     tabIndex: 0,
     "aria-pressed": selected,
     "aria-label": `Select playback target ${row.label}`,
+    title: `Select playback target ${row.label}`,
     onClick: () => onSelect(target),
-    onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => {
+    onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         onSelect(target);
@@ -1364,13 +1545,30 @@ function TimelineRowView({
     },
   } : {};
   return (
-    <div className={`timeline-editor__row timeline-editor__row--${row.kind}${target ? " timeline-editor__row--target" : ""}${selected ? " is-target-selected" : ""}`} style={{ transform: `translateY(${index * rowHeight}px)` }} {...targetProps}>
-      <span className="timeline-editor__row-color" style={{ backgroundColor: row.color ?? "#6c7284" }} />
-      <span className="timeline-editor__row-disclosure">{row.kind === "group" ? "▾" : ""}</span>
-      <span className="timeline-editor__row-label" style={{ paddingLeft: `${Math.max(0, row.depth) * 10 * (rowHeight / TIMELINE_ROW_HEIGHT)}px` }}>{row.label}</span>
+    <div className={`timeline-editor__row timeline-editor__row--${row.kind}${target ? " timeline-editor__row--target" : ""}${selected ? " is-target-selected" : ""}${dropPosition === "inside" ? " is-drop-target" : ""}`}
+      data-depth={row.depth} data-drop-position={dropPosition ?? undefined} draggable={Boolean((onMove || onReorder) && !row.locked)}
+      onDragStart={event => { if ((event.target as HTMLElement).closest("input, button, .timeline-editor__row-actions")) { event.preventDefault(); return; } event.dataTransfer.setData("application/x-timeline-row", row.id); event.dataTransfer.effectAllowed = "move"; }}
+      onDragOver={event => { const position = placement(event); setDropPosition(position); if (position) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }}
+      onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropPosition(null); }}
+      onDragEnd={() => setDropPosition(null)}
+      onDrop={event => {
+        setDropPosition(null);
+        const id = event.dataTransfer.getData("application/x-timeline-row") as TimelineRow["id"];
+        const position = placement(event);
+        if (!id || id === row.id || !position) return;
+        event.preventDefault(); event.stopPropagation();
+        if (position === "inside") onMove?.(id, row.id);
+        else onReorder?.(id, row.id, position);
+      }}
+      style={{ transform: `translateY(${index * rowHeight}px)` }} {...(actions || onRename ? {} : targetProps)}>
+      <span className="timeline-editor__row-color" style={{ backgroundColor: row.color }} />
+      <span aria-hidden="true" style={{ flex: `0 0 ${Math.max(0, row.depth) * 16}px` }} />
+      {row.kind === "group" && (onToggle ? <button type="button" className="timeline-editor__row-disclosure" title={row.expanded === false ? "Expand group" : "Collapse group"} aria-label={`${row.expanded === false ? "Expand" : "Collapse"} ${row.label}`} aria-expanded={row.expanded !== false} onClick={event => { event.stopPropagation(); onToggle(row.id); }}>{row.expanded === false ? "▸" : "▾"}</button> : <span className="timeline-editor__row-disclosure">▾</span>)}
+      {icon && <span className="timeline-editor__row-icon">{icon}</span>}
+      <RowLabel row={row} targetProps={actions || onRename ? targetProps : {}} onRename={onRename} style={{ paddingLeft: 0 }} />
+      {actions && <span className="timeline-editor__row-actions" onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>{actions}</span>}
       {row.bindingId && <span className="timeline-editor__row-binding">{String(row.bindingId).replace(/^binding-/, "")}</span>}
-      {actions && <span style={{ display: "inline-flex", marginLeft: "auto" }} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>{actions}</span>}
-      {row.muted && !actions && <span className="timeline-editor__row-state">M</span>}
+      {row.muted && <span className="timeline-editor__row-state">M</span>}
       {row.locked && <span className="timeline-editor__row-state">L</span>}
     </div>
   );

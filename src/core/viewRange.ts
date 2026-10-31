@@ -5,10 +5,12 @@
  * need. Pure functions, no DOM — the React layer owns the state and the
  * element, this module owns the arithmetic and the clamping rules:
  *
- * - The view never zooms out past "the whole clip fits the viewport"
+ * - By default, the view never zooms out past "the whole clip fits the viewport"
  *   (`fitPixelsPerSecond`), and never zooms in past
  *   `MAX_PIXELS_PER_SECOND`.
  * - `scrollLeft` stays within `[0, contentWidth - viewportWidth]`.
+ * - `allowOutside` opts into free browsing. The caller expands its coordinate
+ *   bounds and rebases negative scroll offsets before applying them to the DOM.
  * - Zooming keeps the time under the pointer (or any anchor x) fixed on
  *   screen (`zoomAroundAnchor`), the way UE's Sequencer and most NLEs do.
  *
@@ -42,9 +44,9 @@ export function fitPixelsPerSecond(durationSeconds: number, viewportWidth: numbe
   return Math.min(MAX_PIXELS_PER_SECOND, width / duration);
 }
 
-/** Clamps a zoom level between "whole clip fits" and the maximum. */
-export function clampPixelsPerSecond(pixelsPerSecond: number, durationSeconds: number, viewportWidth: number): number {
-  const min = fitPixelsPerSecond(durationSeconds, viewportWidth);
+/** Clamps zoom; allowOutside lowers the minimum to 0.01 pixels/second. */
+export function clampPixelsPerSecond(pixelsPerSecond: number, durationSeconds: number, viewportWidth: number, allowOutside = false): number {
+  const min = allowOutside ? 0.01 : fitPixelsPerSecond(durationSeconds, viewportWidth);
   const value = finite(pixelsPerSecond, min);
   return Math.min(MAX_PIXELS_PER_SECOND, Math.max(min, value));
 }
@@ -69,30 +71,31 @@ export function zoomAroundAnchor(
   anchorX: number,
   durationSeconds: number,
   viewportWidth: number,
+  allowOutside = false,
 ): ViewRange {
-  const pixelsPerSecond = clampPixelsPerSecond(view.pixelsPerSecond * finite(factor, 1), durationSeconds, viewportWidth);
+  const pixelsPerSecond = clampPixelsPerSecond(view.pixelsPerSecond * finite(factor, 1), durationSeconds, viewportWidth, allowOutside);
   const anchorTime = (view.scrollLeft + anchorX) / view.pixelsPerSecond;
-  const scrollLeft = clampScrollLeft(anchorTime * pixelsPerSecond - anchorX, durationSeconds, pixelsPerSecond, viewportWidth);
+  const desiredLeft = anchorTime * pixelsPerSecond - anchorX;
+  const scrollLeft = allowOutside ? desiredLeft : clampScrollLeft(desiredLeft, durationSeconds, pixelsPerSecond, viewportWidth);
   return { pixelsPerSecond, scrollLeft };
 }
 
 /**
  * Wheel delta -> zoom factor. `deltaMode` follows `WheelEvent.deltaMode`
- * (0 pixels, 1 lines, 2 pages). Wheel DOWN (positive deltaY) zooms IN, wheel
- * up zooms out — the direction UE's Sequencer and most NLE users expect
- * (2026-09-03 FB: the opposite mapping read as inverted). One typical mouse
+ * (0 pixels, 1 lines, 2 pages). Wheel UP (negative deltaY) zooms IN, wheel
+ * down zooms OUT. One typical mouse
  * notch (~100px) gives about ×1.16; trackpad deltas integrate smoothly.
  */
 export function wheelZoomFactor(deltaY: number, deltaMode = 0): number {
   const pixels = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * 400 : deltaY;
-  return Math.exp(finite(pixels, 0) * 0.0015);
+  return Math.exp(-finite(pixels, 0) * 0.0015);
 }
 
 /** Wheel delta -> row-height zoom factor (Ctrl+wheel). Same direction as the
- * time axis (down = taller rows); coarser so a notch is a visible step. */
+ * time axis (up = taller rows); coarser so a notch is a visible step. */
 export function wheelRowZoomFactor(deltaY: number, deltaMode = 0): number {
   const pixels = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * 400 : deltaY;
-  return Math.exp(finite(pixels, 0) * 0.002);
+  return Math.exp(-finite(pixels, 0) * 0.002);
 }
 
 /**
@@ -147,10 +150,22 @@ export function viewRangeFromThumb(
   durationSeconds: number,
   viewportWidth: number,
   fixed: "start" | "end" | "none" = "none",
+  allowOutside = false,
 ): ViewRange {
   const duration = finite(durationSeconds, 0);
   const width = finite(viewportWidth, 0);
   if (duration <= 0 || width <= 0) return { pixelsPerSecond: DEFAULT_PIXELS_PER_SECOND, scrollLeft: 0 };
+  if (allowOutside) {
+    const minSpan = width / (MAX_PIXELS_PER_SECOND * duration);
+    let start = finite(thumb.start, 0);
+    let end = finite(thumb.end, 1);
+    if (end - start < minSpan) {
+      if (fixed === "end") start = end - minSpan;
+      else end = start + minSpan;
+    }
+    const pixelsPerSecond = clampPixelsPerSecond(width / ((end - start) * duration), duration, width, true);
+    return { pixelsPerSecond, scrollLeft: fixed === "end" ? end * duration * pixelsPerSecond - width : start * duration * pixelsPerSecond };
+  }
   const minFraction = Math.min(1, width / (MAX_PIXELS_PER_SECOND * duration));
   let start = Math.min(1, Math.max(0, finite(thumb.start, 0)));
   let end = Math.min(1, Math.max(0, finite(thumb.end, 1)));

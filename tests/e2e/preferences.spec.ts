@@ -1,0 +1,132 @@
+import { setPlaybackEdge } from "./playback-helpers";
+import { test, expect } from "@playwright/test";
+
+test("track names edit with commit and cancel; controls stay legible and labelled", async ({ page }) => {
+  await page.goto("/");
+  const label = page.locator(".timeline-editor__row-label").filter({ hasText: "Root Motion" });
+  await expect(label).toHaveCSS("font-size", "10.4px");
+  await expect(label).toHaveCSS("font-weight", "600");
+  await expect(page.getByRole("button", { name: "Mute Root Motion", exact: true })).toHaveCSS("font-size", "10.4px");
+  const geometry = await label.evaluate(element => {
+    const strip = element.parentElement!.querySelector(".timeline-editor__row-color")!.getBoundingClientRect();
+    const row = element.parentElement!.getBoundingClientRect();
+    return { gap: element.parentElement!.querySelector(".timeline-editor__row-icon")!.getBoundingClientRect().left - strip.right, height: strip.height, rowHeight: row.height };
+  });
+  expect(geometry.gap).toBe(5);
+  expect(Math.abs(geometry.height - geometry.rowHeight)).toBeLessThanOrEqual(1);
+  await label.dblclick();
+  await page.getByRole("textbox", { name: "Track name" }).fill("Walk");
+  await page.getByRole("textbox", { name: "Track name" }).press("Enter");
+  await expect(page.getByRole("button", { name: "Mute Walk", exact: true })).toBeVisible();
+  await page.locator(".timeline-editor__row-label").filter({ hasText: "Walk" }).dblclick();
+  await page.getByRole("textbox", { name: "Track name" }).fill("Cancelled");
+  await page.getByRole("textbox", { name: "Track name" }).press("Escape");
+  await expect(page.getByRole("button", { name: "Mute Walk", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Add track", exact: true }).click();
+  const missing = await page.locator('button, [role="button"], [role="menuitem"]').evaluateAll(elements => elements.filter(element => !element.getAttribute("title")?.trim()).map(element => element.outerHTML));
+  expect(missing).toEqual([]);
+});
+
+test("layout and timeline preferences survive reload; invalid storage is ignored", async ({ page }) => {
+  await page.goto("/");
+  const split = page.getByRole("separator", { name: "Preview and timeline height" });
+  await split.focus();
+  await split.press("ArrowUp");
+  await split.press("ArrowUp");
+  const height = await split.getAttribute("aria-valuenow");
+  const tree = page.getByRole("separator", { name: "Track panel width" });
+  await tree.focus();
+  await tree.press("ArrowRight");
+  await expect(tree).toHaveAttribute("aria-valuenow", "222");
+  await page.getByRole("button", { name: "Snap to frames" }).click();
+  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await page.reload();
+  await expect(split).toHaveAttribute("aria-valuenow", height!);
+  await expect(tree).toHaveAttribute("aria-valuenow", "222");
+  await expect(page.getByRole("button", { name: "Snap to frames" })).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("timeline-editor.demo.ui.v1")!).timeline.displayMode)).toBe("seconds");
+  await page.evaluate(() => localStorage.setItem("timeline-editor.demo.ui.v1", "{broken"));
+  await page.reload();
+  await expect(tree).toHaveAttribute("aria-valuenow", "212");
+  await expect(page.getByRole("button", { name: "Snap to frames" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("preview splitter drags, cancels and resets", async ({ page }) => {
+  await page.goto("/");
+  const split = page.getByRole("separator", { name: "Preview and timeline height" });
+  const original = Number(await split.getAttribute("aria-valuenow"));
+  const box = (await split.boundingBox())!;
+  await page.mouse.move(box.x + 100, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 100, box.y - 60 + box.height / 2);
+  await expect(split).toHaveAttribute("aria-valuenow", String(original - 60));
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await expect(split).toHaveAttribute("aria-valuenow", String(original));
+  await split.press("ArrowUp");
+  await split.press("Home");
+  await expect(split).toHaveAttribute("aria-valuenow", String(original));
+});
+
+test("stress fixture labels do not advertise unsupported rename", async ({ page }) => {
+  await page.goto("/?stress=1");
+  const label = page.locator(".timeline-editor__row-label").first();
+  await expect(label).not.toHaveAttribute("title", /Double-click/);
+  await label.dblclick();
+  await expect(page.getByRole("textbox", { name: "Track name" })).toHaveCount(0);
+});
+
+for (const fps of [24, 30]) test(`time editing and clip feedback follow the display mode at ${fps} fps`, async ({ page }) => {
+  await page.goto(`/?fps=${fps}`);
+  const out = page.getByRole("slider", { name: "Playback range end", exact: true });
+  const input = page.getByRole("slider", { name: "Playback range start", exact: true });
+  await expect(out).toHaveAttribute("aria-valuetext", `${12 * fps} f`);
+  const clip = page.getByRole("button", { name: "Clip Animation", exact: true });
+  await clip.dblclick({ position: { x: 40, y: 20 } });
+  const start = page.getByRole("spinbutton", { name: "Clip start", exact: true });
+  const end = page.getByRole("spinbutton", { name: "Clip end", exact: true });
+  await expect(end).toHaveValue(String(12 * fps));
+  await start.fill(String(2 * fps)); await start.press("Enter");
+  await expect(clip).toHaveAttribute("data-start", "2");
+  await expect(page.getByRole("complementary", { name: "Clip properties" })).toContainText(`${2 * fps} f`);
+  await page.getByRole("button", { name: "Close properties" }).click();
+  await clip.click();
+  await page.getByRole("application", { name: "Timeline scrubber" }).press("Control+ArrowRight");
+  await expect.poll(async () => Number(await clip.getAttribute("data-start"))).toBeCloseTo(2 + 1 / fps, 8);
+  await expect(clip).toHaveAttribute("title", `Animation · ${2 * fps + 1} f — ${12 * fps + 1} f`);
+  const box = (await clip.boundingBox())!;
+  await page.mouse.move(box.x + 25, box.y + 20); await page.mouse.down();
+  await page.mouse.move(box.x + 85, box.y + 20);
+  await expect(page.locator(".timeline-editor__drop-preview")).toHaveText(/^-?\d+ f$/);
+  await page.keyboard.press("Escape"); await page.mouse.up();
+  await setPlaybackEdge(page, "start", 1);
+  await setPlaybackEdge(page, "end", 8);
+  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await expect(out).toHaveAttribute("aria-valuetext", "8.00 s"); await expect(input).toHaveAttribute("aria-valuetext", "1.00 s");
+  await expect(clip).toHaveAttribute("title", / s — .* s$/);
+  await expect.poll(async () => Number(await clip.getAttribute("data-start"))).toBeCloseTo(2 + 1 / fps, 8);
+  await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
+  await page.reload();
+  await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
+  await expect(out).toHaveAttribute("aria-valuetext", "8.00 s");
+  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await expect(out).toHaveAttribute("aria-valuetext", `${8 * fps} f`);
+  await expect(input).toHaveAttribute("aria-valuetext", `${fps} f`);
+  await expect.poll(async () => Number(await clip.getAttribute("data-start"))).toBeCloseTo(2 + 1 / fps, 8);
+});
+
+test("viewing a sub-frame endpoint as frames does not round the saved edit", async ({ page }) => {
+  await page.goto("/?fps=30");
+  await page.getByRole("button", { name: "Toggle time display" }).click();
+  const clip = page.getByRole("button", { name: "Clip Animation", exact: true });
+  await clip.dblclick({ position: { x: 40, y: 20 } });
+  const end = page.getByRole("spinbutton", { name: "Clip end", exact: true });
+  await end.fill("11.999"); await end.press("Enter");
+  await expect(clip).toHaveAttribute("data-end", "11.999");
+  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await expect(end).toHaveValue("360");
+  await end.focus(); await end.press("Tab");
+  await expect(clip).toHaveAttribute("data-end", "11.999");
+  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await expect(end).toHaveValue("11.999");
+});

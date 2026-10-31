@@ -23,3 +23,13 @@ describe("host controlled edits", () => {
     expect(() => proposeTimelineItemEdit(clip, "move", NaN, bounds, 30)).toThrow();
   });
 });
+
+
+it("keeps point edits inside half-open bounds and rejects malformed item times", () => {
+  const cue = { kind: "cue" as const, id: timelineId<"cue">("q"), rowId: clip.rowId, time: 5, label: "cue", color: "red" };
+  expect(proposeTimelineItemEdit(cue, "move", 100, bounds, 30).next).toMatchObject({ time: 10 - 1 / 30 });
+  expect(proposeTimelineItemEdit(cue, "move", 100, { start: 0, end: .001 }, 30).next).toMatchObject({ time: 0 });
+  expect(() => proposeTimelineItemEdit({ ...cue, time: NaN }, "move", 1, bounds, 30)).toThrow(RangeError);
+  expect(() => proposeTimelineItemEdit({ ...clip, range: { start: NaN, end: 4 } }, "move", 1, bounds, 30)).toThrow(RangeError);
+  expect(() => proposeTimelineItemEdit({ ...clip, range: { start: 2, end: Infinity } }, "resize-end", 1, bounds, 30)).toThrow(RangeError);
+});

@@ -68,6 +68,21 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("TimelineEditor transport and interaction boundary", () => {
+  it("queries negative key times without changing row indexing", () => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(300);
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(200);
+    const data = source();
+    const getRows=vi.fn(data.getRows);
+    const getKeys=vi.fn(data.getKeys);
+    const getItems=vi.fn(data.getItems);
+    render(<TimelineEditor dataSource={{...data,getRange:()=>({start:-2,end:3}),getRows,getKeys,getItems}} />);
+    expect(getRows.mock.calls[0][0].start).toBe(0);
+    expect(getKeys.mock.calls.at(-1)?.[0].range.start).toBe(-2);
+    expect(getItems.mock.calls.at(-1)?.[0].range.start).toBe(-2);
+    expect(getKeys.mock.calls.at(-1)?.[0].rowIds).toEqual([rowId]);
+    width.mockRestore();
+    height.mockRestore();
+  });
   it("keeps transport disabled without a controller", () => {
     render(<TimelineEditor dataSource={source()} />);
     expect((screen.getByRole("button", { name: "Play" }) as HTMLButtonElement).disabled).toBe(true);
@@ -265,10 +280,10 @@ describe("TimelineEditor transport and interaction boundary", () => {
     const root = document.querySelector(".timeline-editor") as HTMLElement;
     const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
     expect(root.style.getPropertyValue("--timeline-row-zoom")).toBe("1");
-    fireEvent(viewport, new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true }));
+    fireEvent(viewport, new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true }));
     const zoomed = Number(root.style.getPropertyValue("--timeline-row-zoom"));
     expect(zoomed).toBeGreaterThan(1);
-    fireEvent(viewport, new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true }));
+    fireEvent(viewport, new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true }));
     expect(Number(root.style.getPropertyValue("--timeline-row-zoom"))).toBeCloseTo(1, 6);
   });
 
@@ -278,16 +293,16 @@ describe("TimelineEditor transport and interaction boundary", () => {
     const content = document.querySelector(".timeline-editor__content") as HTMLDivElement;
     const startWidth = parseFloat(content.style.width);
     act(() => {
-      for (let i = 0; i < 3; i++) fireEvent(viewport, new WheelEvent("wheel", { deltaY: 100, bubbles: true, cancelable: true }));
+      for (let i = 0; i < 3; i++) fireEvent(viewport, new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true }));
     });
-    // Three notches of +100px (wheel down = zoom in): exp(0.0015 * 300) ~= 1.568x, not a single notch's 1.16x.
+    // Three notches of -100px (wheel up = zoom in): exp(0.0015 * 300) ~= 1.568x, not a single notch's 1.16x.
     expect(parseFloat(content.style.width) / startWidth).toBeCloseTo(Math.exp(0.45), 3);
   });
 
   it("does not throw on plain / Shift wheel and exposes the view range thumb", () => {
     render(<TimelineEditor dataSource={source()} frameRate={24} />);
     const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
-    const wheel = new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true });
+    const wheel = new WheelEvent("wheel", { deltaY: 100, bubbles: true, cancelable: true });
     fireEvent(viewport, wheel);
     expect(wheel.defaultPrevented).toBe(true);
     const thumb = screen.getByRole("scrollbar", { name: "Timeline view range" });
@@ -382,6 +397,67 @@ describe("TimelineEditor transport and interaction boundary", () => {
   });
 });
 
+it("restores view preferences and does not emit again when only callback identity changes", () => {
+  const changed = vi.fn();
+  const dataSource = source();
+  const { rerender } = render(<TimelineEditor dataSource={dataSource} initialViewState={{ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds" }} onViewStateChange={state => changed(state)} />);
+  expect(changed).toHaveBeenLastCalledWith({ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds", viewExtent: null });
+  changed.mockClear();
+  rerender(<TimelineEditor dataSource={dataSource} onViewStateChange={state => changed(state)} />);
+  expect(changed).not.toHaveBeenCalled();
+});
+
+it("group disclosure does not submit its host form", () => {
+  const submit = vi.fn(event => event.preventDefault());
+  const toggle = vi.fn();
+  const data = source();
+  render(<form onSubmit={submit}><TimelineEditor dataSource={{ ...data, getRows: () => [{ id: rowId, label: "Group", kind: "group", depth: 0, expanded: true }] }} onToggleRow={toggle} /></form>);
+  fireEvent.click(screen.getByRole("button", { name: "Collapse Group" }));
+  expect(toggle).toHaveBeenCalledWith(rowId);
+  expect(submit).not.toHaveBeenCalled();
+});
+
+it("leaves custom inspector keyboard controls to the host", () => {
+  const transport = controller();
+  const onDelete = vi.fn(), onKeyDown = vi.fn();
+  render(<TimelineEditor dataSource={source()} playbackController={transport}
+    editing={{ selectedClipId: null, canEditClip: () => true, canDropFiles: () => true, onSelectClip: vi.fn(), onMoveClip: vi.fn(), onDropFiles: vi.fn(), onDelete, onUndo: vi.fn(), onRedo: vi.fn() }}
+    slots={{ inspector: <div role="slider" tabIndex={0} aria-label="Host slider" onKeyDown={onKeyDown} /> }} />);
+  const slider = screen.getByRole("slider", { name: "Host slider" });
+  for (const key of [" ", "ArrowRight", "Delete"]) fireEvent.keyDown(slider, { key });
+  expect(onKeyDown).toHaveBeenCalledTimes(3);
+  expect(transport.dispatch).not.toHaveBeenCalled();
+  expect(onDelete).not.toHaveBeenCalled();
+});
+
+it("keeps external transport inside playback bounds while browsing outside the data", () => {
+  const playback = controller({ time: 2, range: { start: 2, end: 8 } });
+  render(<TimelineEditor dataSource={source()} playbackController={playback}
+    initialViewState={{ viewExtent: { start: -10, end: 20 }, pixelsPerSecond: 20 }} />);
+  const viewport = screen.getByRole("application", { name: "Timeline scrubber" });
+  const pointer = (element: Element, type: string, clientX: number) => {
+    const event = new Event(type, { bubbles: true });
+    Object.assign(event, { button: 0, pointerId: 1, clientX });
+    fireEvent(element, event);
+  };
+  pointer(viewport, "pointerdown", 0);
+  pointer(viewport, "pointerup", 0);
+  expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 2, target });
+  pointer(viewport, "pointerdown", 800);
+  pointer(viewport, "pointerup", 800);
+  expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 8, target });
+  const lane = document.querySelector(".timeline-editor__loop-lane")!;
+  pointer(lane, "pointerdown", 0);
+  pointer(lane, "pointermove", 800);
+  pointer(lane, "pointerup", 800);
+  expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "setLoopRange", range: { start: 2, end: 8 }, target });
+  playback.dispatch.mockClear();
+  fireEvent.click(screen.getByRole("button", { name: "Previous frame" }));
+  const seeks = playback.dispatch.mock.calls.map(([command]) => command).filter(command => command.type === "seek");
+  expect(seeks.length).toBeGreaterThan(0);
+  for (const seek of seeks) expect(seek.time).toBe(2);
+});
+
 it('opts into item commits and cancels an edit on Escape', () => {
   const data = source();
   const item = { kind: 'clip' as const, id: timelineId<'clip'>('edit-clip'), rowId, label: 'Edit me', color: '#fff', range: { start: 0, end: 10 } };
@@ -410,4 +486,42 @@ it('owns optional sidebar content and restores the layout when omitted', () => {
   view.rerender(<TimelineEditor dataSource={data} />);
   expect(screen.queryByRole('complementary')).toBeNull();
   expect(document.querySelector('.timeline-editor--with-sidebar')).toBeNull();
+});
+
+
+it("rejects a host edit if its data revision changes during the drag", () => {
+  let revision = 1;
+  const data = source();
+  data.getRevision = () => revision;
+  data.getItems = () => [{ kind: "clip", id: timelineId<"clip">("c"), rowId, label: "clip", color: "red", range: { start: 0, end: 5 } }];
+  const onCommit = vi.fn();
+  const view = render(<TimelineEditor dataSource={data} editing={{ onCommit }} />);
+  const viewport = screen.getByRole("application", { name: "Timeline scrubber" });
+  const pointer = (type: string, x: number) => { const event = new Event(type, { bubbles: true }); Object.assign(event, { button: 0, pointerId: 1, clientX: x, clientY: 10 }); fireEvent(viewport, event); };
+  pointer("pointerdown", 20);
+  pointer("pointermove", 40);
+  revision++;
+  view.rerender(<TimelineEditor dataSource={data} editing={{ onCommit }} />);
+  pointer("pointerup", 40);
+  expect(onCommit).not.toHaveBeenCalled();
+});
+
+it("opens the host sidebar on item double-click and leaves its shortcuts host-owned", () => {
+  const data = source();
+  data.getItems = () => [{ kind: "cue", id: timelineId<"cue">("cue"), rowId, label: "cue", color: "red", time: 1 }];
+  const transport = controller();
+  const onSelect = vi.fn(), onKeyDown = vi.fn();
+  render(<TimelineEditor dataSource={data} playbackController={transport} editing={{ onSelect, onCommit: vi.fn() }}
+    sidebar={{ title: "Properties", content: <div role="slider" tabIndex={0} onKeyDown={onKeyDown} /> }} />);
+  // Default scale is fit to the viewport; use the first hit's exact time at 1s.
+  const viewport = screen.getByRole("application", { name: "Timeline scrubber" });
+  const scale = Number(document.querySelector<HTMLElement>(".timeline-editor__content")?.style.width.replace("px", "")) / 10;
+  fireEvent.doubleClick(viewport, { clientX: scale, clientY: 10 });
+  expect(onSelect).toHaveBeenCalledWith(data.getItems({ rowIds: [rowId], range: { start: 0, end: 10 } })[0]);
+  expect(screen.getByRole("complementary", { name: "Properties" })).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("slider"), { key: " " });
+  expect(onKeyDown).toHaveBeenCalledOnce();
+  expect(transport.dispatch).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Close Properties" }));
+  expect(screen.queryByRole("complementary", { name: "Properties" })).toBeNull();
 });

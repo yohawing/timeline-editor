@@ -17,14 +17,18 @@
       "import": "./dist/core.js"
     },
     "./styles.css": "./dist/timeline.css",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./audio": {
+      "types": "./dist/types/audio/index.d.ts",
+      "import": "./dist/audio.js"
+    }
   },
   "main": "./dist/index.js",
   "types": "./dist/types/index.d.ts",
   "scripts": {
     "dev": "vite --config examples/react-vite/vite.config.ts",
     "build": "tsc -p tsconfig.build.json && node scripts/emit-css-type.mjs && vite build",
-    "build:example": "vite build --config examples/react-vite/vite.config.ts",
+    "build:example": "tsc -p examples/react-vite/tsconfig.json && vite build --config examples/react-vite/vite.config.ts",
     "test": "vitest run",
     "test:browser": "playwright test",
     "test:perf": "playwright test tests/e2e/performance.spec.ts",

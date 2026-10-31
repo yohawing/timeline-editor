@@ -10,11 +10,16 @@ export function normalizeFrameRate(frameRate: number): number {
   return frameRate;
 }
 
-export function clampTimelineTime(time: number, timeEnd: number): number {
-  const end = Number.isFinite(timeEnd) && timeEnd >= 0 ? timeEnd : 0;
-  if (Number.isNaN(time) || time === -Infinity) return 0;
-  if (time === Infinity) return end;
-  return Math.min(end, Math.max(0, time));
+export function clampTimelineTime(time: number, timeEnd: number | TimeRange): number {
+  const range = typeof timeEnd === "number" ? { start: 0, end: Number.isFinite(timeEnd) ? Math.max(0, timeEnd) : 0 } : timeEnd;
+  if (Number.isNaN(time) || time === -Infinity) return range.start;
+  if (time === Infinity) return range.end;
+  return Math.min(range.end, Math.max(range.start, time));
+}
+
+function formatFrame(value: number): string {
+  const frame = Math.round(value);
+  return `${frame < 0 ? "-" : ""}${String(Math.abs(frame)).padStart(4, "0")}`;
 }
 
 /** Display formatting never changes canonical seconds. */
@@ -26,7 +31,7 @@ export function snapTimelineTimeToFrame(time: number, frameRate = 24): number {
 
 export function resolveTimelineSeekTime(
   time: number,
-  timeEnd: number,
+  timeEnd: number | TimeRange,
   policy: TimelineSeekPolicy = "unsnapped",
   frameRate = 24,
 ): number {
@@ -38,29 +43,29 @@ export function resolveTimelineSeekTime(
 
 export function formatTimelineReadout(
   time: number,
-  timeEnd: number,
+  timeEnd: number | TimeRange,
   displayMode: TimelineDisplayMode,
   frameRate = 24,
 ): string {
   const fps = normalizeFrameRate(frameRate);
   const canonical = clampTimelineTime(time, timeEnd);
-  const end = clampTimelineTime(timeEnd, timeEnd);
+  const end = clampTimelineTime(typeof timeEnd === "number" ? timeEnd : timeEnd.end, timeEnd);
   if (displayMode === "frames") {
-    return `${String(Math.round(canonical * fps)).padStart(4, "0")} / ${String(Math.round(end * fps)).padStart(4, "0")}`;
+    return `${formatFrame(canonical * fps)} / ${formatFrame(end * fps)}`;
   }
   return `${canonical.toFixed(2)} / ${end.toFixed(2)} s`;
 }
 
 export function formatCompactTimelineReadout(
   time: number,
-  timeEnd: number,
+  timeEnd: number | TimeRange,
   displayMode: TimelineDisplayMode,
   frameRate = 24,
 ): string {
   const fps = normalizeFrameRate(frameRate);
   const canonical = clampTimelineTime(time, timeEnd);
   return displayMode === "frames"
-    ? `${String(Math.round(canonical * fps)).padStart(4, "0")} f`
+    ? `${formatFrame(canonical * fps)} f`
     : `${canonical.toFixed(2)} s`;
 }
 
@@ -69,9 +74,9 @@ export function formatCompactTimelineReadout(
  * or malformed range (end <= start, non-finite bounds) to `null`, which
  * callers treat as "no loop range" (playback loops the full duration).
  */
-export function clampTimelineLoopRange(range: TimeRange | null | undefined, duration: number): TimeRange | null {
+export function clampTimelineLoopRange(range: TimeRange | null | undefined, duration: number | TimeRange): TimeRange | null {
   if (!range) return null;
-  const end = Number.isFinite(duration) && duration >= 0 ? duration : 0;
+  const end = typeof duration === "number" ? (Number.isFinite(duration) && duration >= 0 ? duration : 0) : duration;
   const start = clampTimelineTime(range.start, end);
   const rawEnd = clampTimelineTime(range.end, end);
   if (!(rawEnd > start)) return null;
@@ -98,7 +103,7 @@ export function timelineRulerStep(baseStep: number, pixelsPerSecond: number, lab
 }
 
 export function visibleTimelineTicks(
-  timeEnd: number,
+  timeEnd: number | TimeRange,
   scrollLeft: number,
   viewportWidth: number,
   pixelsPerSecond: number,
@@ -106,17 +111,18 @@ export function visibleTimelineTicks(
   overscanTicks = 2,
   maxTicks = 512,
 ): number[] {
-  const end = Number.isFinite(timeEnd) ? Math.max(0, timeEnd) : 0;
+  const start = typeof timeEnd === "number" ? 0 : timeEnd.start;
+  const end = typeof timeEnd === "number" ? (Number.isFinite(timeEnd) ? Math.max(0, timeEnd) : 0) : timeEnd.end - start;
   const scale = Number.isFinite(pixelsPerSecond) ? Math.max(0.001, pixelsPerSecond) : 1;
   const step = Number.isFinite(tickStep) ? Math.max(0.001, tickStep) : 1;
   const left = Number.isFinite(scrollLeft) ? Math.max(0, scrollLeft) : 0;
   const width = Number.isFinite(viewportWidth) ? Math.max(0, viewportWidth) : 0;
   const overscan = Number.isFinite(overscanTicks) ? Math.max(0, Math.floor(overscanTicks)) : 0;
-  const maxIndex = Math.floor(end / step);
+  const maxIndex = Math.floor((start + end) / step);
   const visibleLeft = Math.min(left, Math.max(0, end * scale - width));
   const visibleRight = Math.min(end, (visibleLeft + width) / scale);
-  const first = Math.max(0, Math.floor(visibleLeft / scale / step) - overscan);
-  const last = Math.min(maxIndex, Math.ceil(visibleRight / step) + overscan);
+  const first = Math.max(Math.ceil(start / step), Math.floor((start + visibleLeft / scale) / step) - overscan);
+  const last = Math.min(maxIndex, Math.ceil((start + visibleRight) / step) + overscan);
   const count = Math.min(Math.max(0, Math.floor(maxTicks)), Math.max(0, last - first + 1));
   return Array.from({ length: count }, (_, index) => (first + index) * step);
 }

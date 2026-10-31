@@ -27,7 +27,7 @@ test("updates Canvas layout when zoom changes", async ({ page }) => {
   const before = await content.evaluate((element) => element.getBoundingClientRect().width);
   const bounds = (await ruler.boundingBox())!;
   await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 4);
-  await page.mouse.wheel(0, 500);
+  await page.mouse.wheel(0, -500);
   await expect.poll(() => content.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(before);
 });
 
@@ -119,7 +119,7 @@ test("stress mode queries only a bounded virtualized page", async ({ page }) => 
  * the same 24px height as the toolbar it sits inside, and the header is a
  * single natural row.
  */
-test("keeps default (16px root) computed sizes pixel-identical after the rem conversion", async ({ page }) => {
+test("keeps a compact header and readable waveform rows at the default root size", async ({ page }) => {
   await page.goto("/");
   const px = (selector: string, prop: string) =>
     page.locator(selector).first().evaluate(
@@ -127,13 +127,13 @@ test("keeps default (16px root) computed sizes pixel-identical after the rem con
       prop,
     );
   await expect.poll(() => px(".timeline-editor__header", "height")).toBe(24);
-  await expect.poll(() => px(".timeline-editor__tabs", "height")).toBe(24);
+  await expect(page.locator(".timeline-editor__tabs")).toHaveCount(0);
   await expect.poll(() => px(".timeline-editor__toolbar", "height")).toBe(24);
-  await expect.poll(() => px(".timeline-editor__button", "width")).toBe(22);
-  await expect.poll(() => px(".timeline-editor__row", "height")).toBe(26);
-  await expect.poll(() => px(".timeline-editor__row-disclosure", "width")).toBe(12);
+  await expect.poll(() => px(".timeline-editor__transport .timeline-editor__button", "width")).toBe(22);
+  await expect.poll(() => px(".timeline-editor__row", "height")).toBe(44);
+  await expect(page.locator(".timeline-editor__row-disclosure")).toHaveCount(0);
   await expect.poll(() => px(".timeline-editor__tree-viewport", "width")).toBe(212);
-  await expect.poll(() => px(".timeline-editor__row-height-probe", "height")).toBe(26);
+  await expect.poll(() => px(".timeline-editor__row-height-probe", "height")).toBe(44);
 });
 
 /**
@@ -149,8 +149,8 @@ test("keeps Canvas row painting aligned with the DOM row strip when root font-si
   await page.goto("/");
   await page.evaluate(() => { document.documentElement.style.fontSize = "24px"; }); // 1.5x scale
   const row = page.locator(".timeline-editor__row").first();
-  await expect.poll(() => row.evaluate((element) => Number.parseFloat(getComputedStyle(element).height))).toBe(39); // 26 * 1.5
+  await expect.poll(() => row.evaluate((element) => Number.parseFloat(getComputedStyle(element).height))).toBe(66); // 44 * 1.5
   await expect.poll(() =>
     page.locator(".timeline-editor__row-height-probe").evaluate((element) => element.getBoundingClientRect().height),
-  ).toBe(39);
+  ).toBe(66);
 });
