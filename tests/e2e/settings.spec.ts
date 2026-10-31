@@ -40,9 +40,9 @@ test("settings keyboard interaction stays isolated and the panel fits a short ed
   const panelBox = (await panel.boundingBox())!;
   const editorBox = (await page.getByRole("region", { name: "Timeline editor" }).boundingBox())!;
   expect(panelBox.y + panelBox.height).toBeLessThanOrEqual(editorBox.y + editorBox.height);
-  await page.getByLabel("Playback speed").press("Home");
-  for (let i = 0; i < 38; i++) await page.getByLabel("Playback speed").press("ArrowRight");
-  await page.getByLabel("Playback speed").press("Escape");
+  await page.getByLabel("Playback speed").fill("2");
+  await page.getByLabel("Playback speed").press("Enter");
+  await settings.press("Escape");
   await expect(panel).not.toBeVisible();
   await settings.click();
   await page.getByLabel("Animation preview").click();
@@ -63,8 +63,8 @@ test("numeric time, range and FPS settings drive the host preview", async ({ pag
   const start = page.getByLabel("Playback start time");
   await start.fill("60"); await start.press("Enter");
   await expect(page.getByRole("slider", { name: "Playback range start", exact: true })).toHaveAttribute("aria-valuenow", "1");
-  await page.getByLabel("Playback speed").press("Home");
-  for (let i = 0; i < 8; i++) await page.getByLabel("Playback speed").press("ArrowRight");
+  await page.getByLabel("Playback speed").fill("0.5");
+  await page.getByLabel("Playback speed").press("Enter");
   await expect(page.getByRole("button", { name: "Playback rate", exact: true })).toHaveText("0.5x");
   await page.getByLabel("Time display", { exact: true }).selectOption((await page.getByLabel("Time display", { exact: true }).inputValue()) === "frames" ? "seconds" : "frames");
   await page.getByLabel("Timeline settings").click();
@@ -113,13 +113,15 @@ for (const preset of ["ue", "unity", "maya", "logic"] as const) test(`${preset} 
     expect(await width()).toBe(before);
     await page.keyboard.down("Alt"); await page.keyboard.down("Control");
   }
+  if (preset === "ue") await page.keyboard.down("Control");
   await page.mouse.wheel(0, -600);
+  if (preset === "ue") await page.keyboard.up("Control");
   if (preset === "logic") { await page.keyboard.up("Control"); await page.keyboard.up("Alt"); }
   await expect.poll(width).toBeGreaterThan(before);
   await viewport.evaluate(el => { el.scrollLeft = 0; el.scrollTop = 0; });
   const readout = await page.getByRole("button", { name: "Current time" }).textContent();
   if (preset === "maya" || preset === "unity") await page.keyboard.down("Alt");
-  const button = preset === "unity" ? "left" : "middle";
+  const button = preset === "unity" ? "left" : preset === "ue" ? "right" : "middle";
   await page.mouse.move(box.x + 220, box.y + 80); await page.mouse.down({ button });
   await page.mouse.move(box.x + 120, box.y + 80, { steps: 4 }); await page.mouse.up({ button });
   if (preset === "maya" || preset === "unity") await page.keyboard.up("Alt");
@@ -142,4 +144,60 @@ test("loop UI hides while off and restores its existing interval", async ({ page
   await expect(lane).toHaveCount(0); await expect(band).toHaveCount(0);
   await page.getByRole("button", { name: "Loop", exact: true }).click();
   await expect(band).toHaveAttribute("style", style!);
+});
+
+for (const preset of ["ue", "maya"] as const) for (const dx of [100, -100]) test(`${preset} right drag zoom ${dx} anchors time and cancels without seeking`, async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Timeline settings").click();
+  await page.getByLabel("Operation preset").selectOption(preset);
+  await page.getByLabel("Timeline settings").click();
+  const viewport = page.locator(".timeline-editor__viewport");
+  const box = (await viewport.boundingBox())!;
+  const view = () => viewport.evaluate(el => {
+    const root = document.querySelector<HTMLElement>(".timeline-editor")!;
+    const content = document.querySelector<HTMLElement>(".timeline-editor__content")!;
+    const start = Number(root.dataset.viewStart), end = Number(root.dataset.viewEnd);
+    const pps = content.getBoundingClientRect().width / (end - start);
+    return { pps, start, end, anchor: start + (el.scrollLeft + 220) / pps };
+  });
+  const before = await view();
+  await page.mouse.move(box.x + 220, box.y + 50);
+  await page.keyboard.down("Alt");
+  if (preset === "ue") await page.keyboard.down("Shift");
+  await page.mouse.down({ button: "right" });
+  await page.mouse.move(box.x + 220 + dx, box.y + 50, { steps: 5 });
+  if (dx > 0) await expect.poll(async () => (await view()).pps).toBeGreaterThan(before.pps);
+  else await expect.poll(async () => (await view()).pps).toBeLessThan(before.pps);
+  expect((await view()).anchor).toBeCloseTo(before.anchor, 1);
+  await page.keyboard.press("Escape");
+  await page.mouse.up({ button: "right" });
+  await page.keyboard.up("Alt");
+  if (preset === "ue") await page.keyboard.up("Shift");
+  await expect.poll(async () => (await view()).pps).toBeCloseTo(before.pps, 1);
+  expect((await view()).anchor).toBeCloseTo(before.anchor, 1);
+  expect((await view()).start).toBe(before.start);
+  expect((await view()).end).toBe(before.end);
+  await expect(page.getByLabel("Animation preview")).toHaveAttribute("data-time", "0.000");
+});
+
+test("rate fields accept free values, reject invalid input, and cancel with Escape", async ({ page }) => {
+  await page.goto("/");
+  const rate = page.getByRole("button", { name: "Playback rate", exact: true });
+  await rate.click();
+  let input = page.getByRole("spinbutton", { name: "Playback rate", exact: true });
+  await input.fill("1.375"); await input.press("Enter");
+  await expect(rate).toHaveText("1.375x");
+  await rate.click();
+  await input.fill("2.5"); await input.press("Escape");
+  await expect(rate).toHaveText("1.375x");
+  await page.getByLabel("Timeline settings").click();
+  input = page.getByLabel("Playback speed");
+  for (const invalid of ["", "0", "-1"]) {
+    await input.fill(invalid); await input.press("Enter");
+    await expect(input).toHaveValue("1.375");
+    await expect(rate).toHaveText("1.375x");
+  }
+  await input.fill("6.125"); await page.getByLabel("Time display", { exact: true }).focus();
+  await expect(rate).toHaveText("6.125x");
+  await expect(input).toHaveValue("6.125");
 });

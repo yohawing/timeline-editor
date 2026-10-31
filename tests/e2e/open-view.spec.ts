@@ -6,7 +6,7 @@ test("zoom out exposes both sides without editing playback, and fit restores the
   await expect(page.getByRole("spinbutton", { name: /Playback/ })).toHaveCount(0);
   const ruler = (await page.locator(".timeline-editor__ruler").boundingBox())!;
   await page.mouse.move(ruler.x + ruler.width / 2, ruler.y + 5);
-  await page.mouse.wheel(0, 500);
+  await page.keyboard.down("Control"); await page.mouse.wheel(0, 500); await page.keyboard.up("Control");
   await expect.poll(async () => Number(await editor.getAttribute("data-view-start"))).toBeLessThan(0);
   await expect.poll(async () => Number(await editor.getAttribute("data-view-end"))).toBeGreaterThan(12);
   await expect(page.getByRole("slider", { name: "Playback range start", exact: true })).toHaveAttribute("aria-valuenow", "0");

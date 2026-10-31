@@ -628,6 +628,8 @@ button.timeline-editor__row-disclosure { background: none; border: 0; padding: 0
 .timeline-editor__settings-panel input, .timeline-editor__settings-panel select { min-height: var(--timeline-control-height); }
 .timeline-editor__settings-panel { gap: 10px; }
 
-.timeline-editor__speed-control { display: flex; align-items: center; gap: 6px; }
-.timeline-editor__speed-control output { min-width: 3em; text-align: right; font-variant-numeric: tabular-nums; }
 .timeline-editor__settings-panel input[type=range] { width: 85px; padding: 0; border: 0; accent-color: var(--timeline-accent); }
+
+.timeline-editor__settings-panel input[type=checkbox] { width: 16px; height: 16px; min-height: 0; padding: 0; accent-color: var(--timeline-accent); }
+
+.timeline-editor__rate-input { width: 4.5rem; height: 28px; box-sizing: border-box; color: inherit; background: var(--timeline-surface-0); border: 1px solid var(--timeline-divider); border-radius: 3px; font: inherit; }

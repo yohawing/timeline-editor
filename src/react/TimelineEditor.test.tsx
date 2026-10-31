@@ -155,21 +155,32 @@ describe("TimelineEditor transport and interaction boundary", () => {
     expect(playback.dispatch).toHaveBeenCalledWith({ type: "play", target });
   });
 
-  it("cycles the playback rate and shows 1x when the controller omits rate", () => {
+  it("Logic Return seeks the loop start when stopped in cycle mode", () => {
+    const playback = controller({ looping: true, loopRange: { start: 1, end: 2 } });
+    render(<TimelineEditor dataSource={source()} playbackController={playback} initialViewState={{ keyboardPreset: "logic" }} />);
+    fireEvent.keyDown(screen.getByRole("application", { name: "Timeline scrubber" }), { key: "Enter" });
+    expect(playback.dispatch).toHaveBeenCalledWith({ type: "seek", time: 1, target });
+  });
+
+  it("edits the playback rate and shows 1x when the controller omits rate", () => {
     const playback = controller();
     render(<TimelineEditor dataSource={source()} playbackController={playback} />);
     const rateButton = screen.getByRole("button", { name: "Playback rate" });
     expect(rateButton.textContent).toBe("1x");
     fireEvent.click(rateButton);
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Playback rate" }), { target: { value: "2" } });
+    fireEvent.blur(screen.getByRole("spinbutton", { name: "Playback rate" }));
     expect(playback.dispatch).toHaveBeenCalledWith({ type: "setRate", rate: 2, target });
   });
 
-  it("displays the controller-reported rate and continues the cycle from it", () => {
+  it("edits the controller-reported rate", () => {
     const playback = controller({ rate: 2 });
     render(<TimelineEditor dataSource={source()} playbackController={playback} />);
     const rateButton = screen.getByRole("button", { name: "Playback rate" });
     expect(rateButton.textContent).toBe("2x");
     fireEvent.click(rateButton);
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Playback rate" }), { target: { value: "0.25" } });
+    fireEvent.blur(screen.getByRole("spinbutton", { name: "Playback rate" }));
     expect(playback.dispatch).toHaveBeenCalledWith({ type: "setRate", rate: 0.25, target });
   });
 
@@ -283,7 +294,7 @@ describe("TimelineEditor transport and interaction boundary", () => {
     const view = render(<TimelineEditor dataSource={data} allowViewOutsideRange={false} onViewStateChange={state} initialViewState={{ viewExtent: { start: -100, end: 100 }, pixelsPerSecond: 1 }} />);
     const viewport = view.container.querySelector(".timeline-editor__viewport") as HTMLDivElement;
     const content = view.container.querySelector(".timeline-editor__content") as HTMLDivElement;
-    const wheel = (deltaY: number, shiftKey = false) => fireEvent.wheel(viewport, { deltaY, shiftKey, clientX: 150 });
+    const wheel = (deltaY: number, shiftKey = false) => fireEvent.wheel(viewport, { deltaY, shiftKey, ctrlKey: !shiftKey, clientX: 150 });
     expect(parseFloat(content.style.width)).toBe(300);
     act(() => { for (let i = 0; i < 20; i++) wheel(100); });
     expect(parseFloat(content.style.width)).toBe(300);
@@ -304,8 +315,8 @@ describe("TimelineEditor transport and interaction boundary", () => {
     width.mockRestore();
   });
 
-  it("zooms row height with Ctrl+wheel and leaves the time axis alone", () => {
-    render(<TimelineEditor dataSource={source()} frameRate={24} />);
+  it("Unity zooms row height with Ctrl+wheel and leaves the time axis alone", () => {
+    render(<TimelineEditor dataSource={source()} frameRate={24} initialViewState={{ keyboardPreset: "unity" }} />);
     const root = document.querySelector(".timeline-editor") as HTMLElement;
     const viewport = document.querySelector(".timeline-editor__viewport") as HTMLDivElement;
     expect(root.style.getPropertyValue("--timeline-row-zoom")).toBe("1");
@@ -322,7 +333,7 @@ describe("TimelineEditor transport and interaction boundary", () => {
     const content = document.querySelector(".timeline-editor__content") as HTMLDivElement;
     const startWidth = parseFloat(content.style.width);
     act(() => {
-      for (let i = 0; i < 3; i++) fireEvent(viewport, new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true }));
+      for (let i = 0; i < 3; i++) fireEvent(viewport, new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true }));
     });
     // Three notches of -100px (wheel up = zoom in): exp(0.0015 * 300) ~= 1.568x, not a single notch's 1.16x.
     expect(parseFloat(content.style.width) / startWidth).toBeCloseTo(Math.exp(0.45), 3);
@@ -425,7 +436,7 @@ it("restores view preferences and does not emit again when only callback identit
   const changed = vi.fn();
   const dataSource = source();
   const { rerender } = render(<TimelineEditor dataSource={dataSource} initialViewState={{ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds" }} onViewStateChange={state => changed(state)} />);
-  expect(changed).toHaveBeenLastCalledWith({ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds", viewExtent: null, keyboardPreset: "ue" });
+  expect(changed).toHaveBeenLastCalledWith({ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds", viewExtent: null, keyboardPreset: "ue", autoScroll: false });
   changed.mockClear();
   rerender(<TimelineEditor dataSource={dataSource} onViewStateChange={state => changed(state)} />);
   expect(changed).not.toHaveBeenCalled();
@@ -610,6 +621,7 @@ it("opens the host sidebar on item double-click and leaves its shortcuts host-ow
    fireEvent.keyDown(start, { key: "Enter" });
    expect(changed).toHaveBeenCalledExactlyOnceWith({ start: 10 - 1 / 30, end: 10 });
    fireEvent.change(screen.getByLabelText("Playback speed"), { target: { value: "0.5" } });
+   fireEvent.blur(screen.getByLabelText("Playback speed"));
    expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "setRate", rate: 0.5, target });
  });
  it("seeks seconds with clamping and ignores empty numeric drafts", () => {
@@ -647,4 +659,13 @@ it("accepts fractional FPS input and cancels invalid values", () => {
   }
   expect(changed).not.toHaveBeenCalled();
   expect((input as HTMLInputElement).value).toBe("30");
+});
+
+it("persists the auto-scroll setting through the host view-state callback", () => {
+  const changed = vi.fn();
+  render(<TimelineEditor dataSource={source()} initialViewState={{ autoScroll: true }} onViewStateChange={changed} />);
+  const checkbox = screen.getByRole("checkbox", { name: "Auto scroll" });
+  expect((checkbox as HTMLInputElement).checked).toBe(true);
+  fireEvent.click(checkbox);
+  expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ autoScroll: false }));
 });

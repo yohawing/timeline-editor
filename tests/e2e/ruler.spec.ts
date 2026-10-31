@@ -30,7 +30,7 @@ for (const frames of [120, 10000, 100000, 600000]) {
       const content = page.locator(".timeline-editor__content");
       const beforeZoom = await content.evaluate(element => element.getBoundingClientRect().width);
       await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 4);
-      await page.mouse.wheel(0, -900);
+      await page.keyboard.down("Control"); await page.mouse.wheel(0, -900); await page.keyboard.up("Control");
       await expect.poll(() => content.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(beforeZoom);
       await inspectLabels(page);
       const viewport = page.locator(".timeline-editor__viewport");

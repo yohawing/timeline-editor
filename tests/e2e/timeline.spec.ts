@@ -29,7 +29,7 @@ test("updates Canvas layout when zoom changes", async ({ page }) => {
   const before = await content.evaluate((element) => element.getBoundingClientRect().width);
   const bounds = (await ruler.boundingBox())!;
   await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 4);
-  await page.mouse.wheel(0, -500);
+  await page.keyboard.down("Control"); await page.mouse.wheel(0, -500); await page.keyboard.up("Control");
   await expect.poll(() => content.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(before);
 });
 
