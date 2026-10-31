@@ -36,7 +36,7 @@ test("saved follow mode leaves paused seeks alone and follows a loop back to its
   await page.getByLabel("Timeline settings").click();
   await expect(page.getByRole("checkbox", { name: "Auto scroll" })).toBeChecked();
   await page.getByLabel("Timeline settings").click();
-  await page.getByRole("button", { name: "Current time" }).dblclick();
+  await page.getByRole("button", { name: "Current time" }).click();
   await page.getByRole("spinbutton", { name: "Current frame", exact: true }).fill("240");
   await page.getByRole("spinbutton", { name: "Current frame", exact: true }).press("Enter");
   await expect(page.getByLabel("Animation preview")).toHaveAttribute("data-time", "10.000");

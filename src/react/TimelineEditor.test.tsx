@@ -68,6 +68,43 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("TimelineEditor transport and interaction boundary", () => {
+  it("keeps shortcuts local by default and opts into document transport without duplicate dispatch", () => {
+    const playback = controller();
+    const { rerender, unmount } = render(<TimelineEditor dataSource={source()} playbackController={playback} />);
+    fireEvent.keyDown(document.body, { key: " " });
+    expect(playback.dispatch).not.toHaveBeenCalled();
+    rerender(<TimelineEditor dataSource={source()} playbackController={playback} shortcutScope="document" />);
+    fireEvent.keyDown(document.body, { key: " " });
+    expect(playback.dispatch).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(screen.getByRole("application", { name: "Timeline scrubber" }), { key: " " });
+    expect(playback.dispatch).toHaveBeenCalledTimes(2);
+    fireEvent.keyDown(screen.getByRole("button", { name: "Loop", exact: true }), { key: " " });
+    expect(playback.dispatch).toHaveBeenCalledTimes(3);
+    expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "play", target });
+    unmount();
+    fireEvent.keyDown(document.body, { key: " " });
+    expect(playback.dispatch).toHaveBeenCalledTimes(3);
+  });
+
+  it("document transport preserves host controls, prevented keys, composition and other editors", () => {
+    const playback = controller();
+    render(<><TimelineEditor dataSource={source()} playbackController={playback} shortcutScope="document" />
+      <input aria-label="Host input" /><div contentEditable suppressContentEditableWarning><span>Editable text</span></div>
+      <button>Host action</button><div onKeyDown={event => event.preventDefault()}>Handled keys</div>
+      {["checkbox", "radio", "tab", "menuitem", "switch", "application", "listbox", "tree", "grid", "separator"].map(role => <div key={role} role={role} tabIndex={0}><span>{`Host ${role}`}</span></div>)}
+      <TimelineEditor dataSource={source()} />
+    </>);
+    for (const element of [screen.getByLabelText("Host input"), screen.getByText("Editable text"), screen.getByText("Host action"), screen.getByText("Handled keys"), screen.getAllByRole("application", { name: "Timeline scrubber" })[1]]) {
+      fireEvent.keyDown(element, { key: " " });
+    }
+    for (const role of ["checkbox", "radio", "tab", "menuitem", "switch", "application", "listbox", "tree", "grid", "separator"]) {
+      fireEvent.keyDown(screen.getByText(`Host ${role}`), { key: " " });
+      fireEvent.keyDown(screen.getByText(`Host ${role}`), { key: "ArrowRight" });
+    }
+    fireEvent.keyDown(document.body, { key: " ", isComposing: true });
+    expect(playback.dispatch).not.toHaveBeenCalled();
+  });
+
   it("queries negative key times without changing row indexing", () => {
     const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(300);
     const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(200);
@@ -572,12 +609,12 @@ it("opens the host sidebar on item double-click and leaves its shortcuts host-ow
  it("seeks typed frames through the transport and cancels drafts", () => {
     const playback = controller();
     render(<TimelineEditor dataSource={source()} frameRate={30} playbackController={playback} />);
-    fireEvent.doubleClick(screen.getByRole("button", { name: "Current time" }));
+    fireEvent.click(screen.getByRole("button", { name: "Current time" }));
     fireEvent.change(screen.getByRole("spinbutton", { name: "Current frame" }), { target: { value: "75" } });
     fireEvent.keyDown(screen.getByRole("spinbutton", { name: "Current frame" }), { key: "Enter" });
     expect(playback.dispatch).toHaveBeenCalledWith({ type: "seek", time: 2.5, target });
     playback.dispatch.mockClear();
-    fireEvent.doubleClick(screen.getByRole("button", { name: "Current time" }));
+    fireEvent.click(screen.getByRole("button", { name: "Current time" }));
     fireEvent.change(screen.getByRole("spinbutton", { name: "Current frame" }), { target: { value: "90" } });
     fireEvent.keyDown(screen.getByRole("spinbutton", { name: "Current frame" }), { key: "Escape" });
     expect(playback.dispatch).not.toHaveBeenCalled();
@@ -616,7 +653,7 @@ it("opens the host sidebar on item double-click and leaves its shortcuts host-ow
  it("seeks seconds with clamping and ignores empty numeric drafts", () => {
    const playback = controller();
    render(<TimelineEditor dataSource={source()} playbackController={playback} displayMode="seconds" />);
-   fireEvent.doubleClick(screen.getByRole("button", { name: "Current time" }));
+   fireEvent.click(screen.getByRole("button", { name: "Current time" }));
    const input = screen.getByRole("spinbutton", { name: "Current seconds" });
    fireEvent.change(input, { target: { value: "" } }); fireEvent.keyDown(input, { key: "Enter" });
    expect(playback.dispatch).not.toHaveBeenCalled();

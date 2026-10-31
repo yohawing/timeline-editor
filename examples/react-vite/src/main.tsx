@@ -76,11 +76,12 @@ function Example(): JSX.Element {
   return (
     <main data-project-state={!audio.ready ? "loading" : audio.saving ? "saving" : "ready"} ref={panes.shell} style={panes.style} className="example-shell">
       {panes.divider}
-      <div className="example-preview" onPointerDown={() => document.querySelector<HTMLElement>(".timeline-editor__viewport")?.focus()}>
+      <div className="example-preview" tabIndex={-1} onPointerDown={event => event.currentTarget.focus()}>
         <canvas ref={audio.preview} aria-label="Animation preview" />
       </div>
       <div inert={!audio.ready} className="example-editor" onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
         <TimelineEditor
+          shortcutScope="document"
           theme={theme}
           dataSource={audioData}
           editing={audio.editing}

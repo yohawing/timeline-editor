@@ -312,7 +312,7 @@ Open the gear button for frame/second display, FPS, playback start/end, and play
 
 The Snap icon highlights when enabled. It controls pointer scrubbing, clip/event edits, playback-range handles and loop-range dragging; Alt temporarily bypasses snapping. Explicit frame-step and numeric-navigation commands retain frame snapping. `proposeTimelineItemEdit` also accepts an optional final `snap` argument (default `true`).
 
-Double-click the current-time readout (or focus it and press Enter/F2) to enter a frame number or seconds in the selected display mode. Enter seeks through the existing playback controller, with frame snapping and playback-range clamping. Escape or leaving the field cancels the edit. A controller-free timeline updates its local playhead.
+Click the current-time readout (or focus it and press Enter/F2) to enter a frame number or seconds in the selected display mode. Enter seeks through the existing playback controller, with frame snapping and playback-range clamping. Escape or leaving the field cancels the edit. A controller-free timeline updates its local playhead.
 
 ### Operation presets
 
@@ -347,3 +347,9 @@ Loop OFF hides the loop lane and interval overlay without changing the saved int
 Enable **Auto scroll** in settings to keep the playhead visible during playback. When it leaves the visible time range, the view advances with the playhead near its left side; loop wrap follows back to the start. Zoom and vertical scroll are preserved. Paused seeks do not move the view. The default is off.
 
 Hosts can initialize `initialViewState.autoScroll`; changes are reported through `onViewStateChange` with other view preferences. The demo persists the choice. Browsing limits still follow `allowViewOutsideRange`, and playback range/data remain host-owned.
+
+### Shortcut focus scope
+
+The standalone demo enables transport and view shortcuts across the document, so playback and frame stepping work on initial load and with the preview focused. Playback toolbar buttons also allow these shortcuts; Enter still activates the focused button. Numeric/text inputs, settings, inspectors, editable content and host controls keep their own keyboard behavior. Editing shortcuts (delete, undo, clip nudges) remain local to the timeline.
+
+The reusable component defaults to `shortcutScope="editor"`. A single-editor host can opt into `shortcutScope="document"`; it does not steal focus or forward keys to another DOM element. Already-handled and IME composition events are ignored, and focused timeline instances handle their own keys. Hosts with multiple editors should keep editor scope or enable document scope only on the active editor.

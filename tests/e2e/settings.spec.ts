@@ -52,7 +52,7 @@ test("settings keyboard interaction stays isolated and the panel fits a short ed
 test("numeric time, range and FPS settings drive the host preview", async ({ page }) => {
   await page.goto("/?fps=30");
   const readout = page.getByRole("button", { name: "Current time" });
-  await readout.dblclick();
+  await readout.click();
   await page.getByRole("spinbutton", { name: "Current frame", exact: true }).fill("75");
   await page.getByRole("spinbutton", { name: "Current frame", exact: true }).press("Enter");
   await expect(page.getByLabel("Animation preview")).toHaveAttribute("data-time", "2.500");
@@ -68,7 +68,7 @@ test("numeric time, range and FPS settings drive the host preview", async ({ pag
   await expect(page.getByRole("button", { name: "Playback rate", exact: true })).toHaveText("0.5x");
   await page.getByLabel("Time display", { exact: true }).selectOption((await page.getByLabel("Time display", { exact: true }).inputValue()) === "frames" ? "seconds" : "frames");
   await page.getByLabel("Timeline settings").click();
-  await readout.dblclick();
+  await readout.click();
   const seconds = page.getByRole("spinbutton", { name: "Current seconds", exact: true });
   await seconds.fill("3.5"); await seconds.press("Enter");
   await expect(page.getByLabel("Animation preview")).toHaveAttribute("data-time", "3.500");

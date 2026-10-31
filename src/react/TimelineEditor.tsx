@@ -142,6 +142,10 @@ export interface TimelineHostEditing {
 }
 
 export interface TimelineEditorProps {
+  /** Opt in to document-wide transport/view shortcuts. Editing shortcuts remain local.
+   * Use document scope for a single-editor application; default is editor scope.
+   */
+  shortcutScope?: "editor" | "document";
   /** Compatible host-owned item editing and optional overlay inspector. */
   sidebar?: { title: string; content: ReactNode };
   selectedItem?: { id: string; kind: TimelineItem["kind"] };
@@ -202,6 +206,10 @@ const EMPTY_PLAYBACK: TimelinePlaybackSnapshot = {
   looping: false,
   loopRange: null,
 };
+
+function isShortcutInput(target: HTMLElement): boolean {
+  return target.isContentEditable || Boolean(target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox], [role=combobox], [role=slider], [role=spinbutton]"));
+}
 
 function formatTimelineRate(rate: number): string {
   return `${rate}x`;
@@ -500,6 +508,7 @@ function dispatchSafely(
 
 export function TimelineEditor({
   dataSource,
+  shortcutScope = "editor",
   editing: editingOptions,
   sidebar,
   selectedItem,
@@ -943,7 +952,7 @@ export function TimelineEditor({
     seekTo(stepped);
   }, [fps, playbackRange, seekTo, time]);
 
-  /** Preset transport shortcuts stay scoped to the timeline and exclude host controls. */
+  /** Editing shortcuts stay local; transport/view shortcuts can be shared with the host. */
   const onViewportKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape" && editDrag.current) {
       const pointer = editDrag.current.pointer;
@@ -953,13 +962,20 @@ export function TimelineEditor({
       event.preventDefault();
       return;
     }
+    if (event.defaultPrevented || event.nativeEvent.isComposing) return;
     const target = event.target as HTMLElement;
     if (target.closest(".timeline-editor__event-cue") && (event.ctrlKey || event.metaKey) && ["z", "y"].includes(event.key.toLowerCase())) {
       clipEditing.onKeyDown(event);
       return;
     }
-    if (target.closest(".timeline-editor__inspector, .timeline-editor__sidebar") || target.isContentEditable || target.closest("input, textarea, select, button") || event.defaultPrevented) return;
-    if (clipEditing.onKeyDown(event)) return;
+    if (target.closest(".timeline-editor__inspector, .timeline-editor__sidebar") || isShortcutInput(target)) return;
+    const button = target.closest("button, [role=button], summary");
+    if (button && !target.closest(".timeline-editor__transport")) return;
+    if (!button && clipEditing.onKeyDown(event)) return;
+    onTransportKeyDown(event);
+  };
+
+  const onTransportKeyDown = (event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey" | "repeat" | "preventDefault">) => {
     if (duration <= 0) return;
     const action = keyboardAction(keyboardPreset, event);
     const transport = (type: "play" | "pause") => dispatchSafely(playbackController, { type, target: commandTarget }, onDiagnostic);
@@ -980,6 +996,21 @@ export function TimelineEditor({
     else return;
     event.preventDefault();
   };
+
+  const transportKeyDownRef = useRef(onTransportKeyDown);
+  useEffect(() => { transportKeyDownRef.current = onTransportKeyDown; });
+  useEffect(() => {
+    if (shortcutScope !== "document") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (event.defaultPrevented || event.isComposing || !(target instanceof HTMLElement) || rootRef.current?.closest("[inert]")) return;
+      // Local editors handle their own keys, including settings, inspectors and other instances.
+      if (target.closest(".timeline-editor") || isShortcutInput(target) || target.closest("button, [role=button], summary, a[href], [role=menu], [role=dialog], [role=checkbox], [role=radio], [role=tab], [role=tablist], [role=menuitem], [role=menuitemcheckbox], [role=menuitemradio], [role=switch], [role=application], [role=listbox], [role=option], [role=tree], [role=treeitem], [role=grid], [role=gridcell], [role=separator], [role=scrollbar], dialog, [inert]")) return;
+      transportKeyDownRef.current(event);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [shortcutScope]);
 
   const dispatchLoopRange = useCallback((next: TimeRange | null) => {
     if (playbackController && playbackSnapshot.available) {
@@ -1419,9 +1450,9 @@ export function TimelineEditor({
           {timeDraft === null ? (
             <button ref={readoutRef} type="button" className="timeline-editor__readout"
               disabled={Boolean(playbackController && !playbackSnapshot.available)}
-              onDoubleClick={() => setTimeDraft(String(displayMode === "frames" ? Math.round(currentReadoutTime() * fps) : currentReadoutTime()))}
+              onClick={() => setTimeDraft(String(displayMode === "frames" ? Math.round(currentReadoutTime() * fps) : currentReadoutTime()))}
               onKeyDown={event => { if (event.key === "Enter" || event.key === "F2") { event.preventDefault(); setTimeDraft(String(displayMode === "frames" ? Math.round(currentReadoutTime() * fps) : currentReadoutTime())); } }}
-              title="Double-click to enter current time" aria-label="Current time">{playbackReadout}</button>
+              title="Click to enter current time" aria-label="Current time">{playbackReadout}</button>
           ) : (
             <input ref={timeInputRef} className="timeline-editor__readout timeline-editor__time-input" type="number"
               aria-label={displayMode === "frames" ? "Current frame" : "Current seconds"}
@@ -1440,6 +1471,7 @@ export function TimelineEditor({
                 }
               }} />
           )}
+          <div className="timeline-editor__slot timeline-editor__slot--end">
           <details ref={settingsRef} className="timeline-editor__settings" onKeyDown={event => {
             event.stopPropagation();
             if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); }
@@ -1521,7 +1553,7 @@ export function TimelineEditor({
             </div>
           </details>
           <button type="button" className={`timeline-editor__button${snap ? " is-active" : ""}`} aria-label="Snap to frames" aria-pressed={snap} title={`Snap to frames: ${snap ? "On" : "Off"} · ${keyboardPreset === "unity" ? "Hold Alt after starting a drag to bypass; Alt+drag pans" : "Alt-drag to bypass"}`} onClick={() => setSnap(!snap)}><SnapIcon /></button>
-          <div className="timeline-editor__slot timeline-editor__slot--end">{slots?.toolbarEnd}
+            {slots?.toolbarEnd}
             {sidebar && <button type="button" className="timeline-editor__button timeline-editor__sidebar-toggle" aria-label={`Toggle ${sidebar.title}`} title={`Toggle ${sidebar.title}`} aria-controls={sidebarId} aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(open => !open)}>{sidebar.title}</button>}
           </div>
         </div>
