@@ -65,13 +65,13 @@ test("built-in light theme preserves the Canvas and view during switching", asyn
   await canvas.evaluate(node => { node.dataset.identity = "same"; });
   const ruler = page.locator(".timeline-editor__ruler");
   await ruler.click({ position: { x: 200, y: 4 } });
-  const readout = await page.getByRole("button", { name: "Toggle time display" }).textContent();
+  const readout = await page.getByRole("button", { name: "Current time" }).textContent();
   await page.getByLabel("Theme", { exact: true }).selectOption("light");
   await expect(editor).toHaveAttribute("data-theme", "light");
   await expect(editor).toHaveCSS("color-scheme", "light");
   await expect.poll(() => rowPixel(page)).toEqual([244, 246, 247, 255]);
   await expect(canvas).toHaveAttribute("data-identity", "same");
-  await expect(page.getByRole("button", { name: "Toggle time display" })).toHaveText(readout!);
+  await expect(page.getByRole("button", { name: "Current time" })).toHaveText(readout!);
   await page.getByRole("button", { name: "Clip Animation", exact: true }).dblclick();
   const input = page.locator(".timeline-editor__inspector input").first();
   await expect(input).toHaveCSS("background-color", "rgb(248, 250, 251)");

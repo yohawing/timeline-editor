@@ -13,10 +13,12 @@ test("renders full timeline and transport target selection", async ({ page }) =>
 test("supports compact variant, FPS formatting and display switch", async ({ page }) => {
   await page.goto("/?variant=compact&fps=30");
   await expect(page.locator(".timeline-editor--compact")).toBeVisible();
-  await expect(page.locator(".timeline-editor__fps")).toContainText("30 fps");
-  const readout = page.getByRole("button", { name: "Toggle time display" });
+  await expect(page.getByLabel("Frame rate")).toHaveValue("30");
+  const readout = page.getByRole("button", { name: "Current time" });
   await expect(readout).toContainText("f");
-  await readout.click();
+  await page.getByLabel("Timeline settings").click();
+  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await page.getByLabel("Timeline settings").click();
   await expect(readout).toContainText("s");
 });
 
@@ -54,7 +56,7 @@ test("repaints for ResizeObserver and device-pixel-ratio changes", async ({ page
 test("scrub pointer capture and cancel restore the origin", async ({ page }) => {
   await page.goto("/");
   const viewport = page.locator(".timeline-editor__viewport");
-  const readout = page.getByRole("button", { name: "Toggle time display" });
+  const readout = page.getByRole("button", { name: "Current time" });
   const before = await readout.textContent();
   const box = await viewport.boundingBox();
   expect(box).not.toBeNull();
@@ -78,7 +80,7 @@ test("disables transport and keeps finite layout for malformed host playback", a
 test("toggles a single play/pause button and steps frames and range bounds", async ({ page }) => {
   await page.goto("/?fps=24");
   const toggle = page.getByRole("button", { name: "Play", exact: true });
-  const readout = page.getByRole("button", { name: "Toggle time display" });
+  const readout = page.getByRole("button", { name: "Current time" });
   await expect(readout).toContainText("0000");
   await page.getByRole("button", { name: "Next frame" }).click();
   await expect(readout).toContainText("0001");

@@ -1,3 +1,5 @@
+import { keyboardAction, keyboardPresets, normalizeKeyboardPreset, type TimelineKeyboardPreset } from "./keyboardPresets";
+export type { TimelineKeyboardPreset } from "./keyboardPresets";
 import {
   useCallback,
   useId,
@@ -115,6 +117,8 @@ export interface TimelineEditorSlots {
 }
 
 export interface TimelineViewState {
+  /** Transport keyboard preset; omitted in older saved preferences. */
+  keyboardPreset?: TimelineKeyboardPreset;
   /** Expanded browsing bounds, separate from project/playback data. */
   viewExtent?: TimeRange | null;
   treeWidth: number | null;
@@ -162,7 +166,7 @@ export interface TimelineEditorProps {
    */
   showTitle?: boolean;
   /**
-   * Frame-rate picker in the toolbar, replacing the read-only "N fps" label.
+   * Frame-rate picker in timeline settings, replacing the read-only "N fps" label.
    * Fully controlled: the host lists the choices, names the current one
    * (`frameRateValue`) and receives the pick. Values are opaque strings so a
    * host can offer entries like "auto" next to numbers; `frameRate` itself
@@ -580,6 +584,11 @@ export function TimelineEditor({
   const duration = Math.max(0, range.end - range.start);
   const [playbackRangePreview, setPlaybackRangePreview] = useState<TimeRange | null>(null);
   const playbackRange = playbackSnapshot.available ? (playbackSnapshot.range ?? dataRange) : dataRange;
+  const [keyboardPreset, setKeyboardPreset] = useState(() => normalizeKeyboardPreset(initialViewState?.keyboardPreset));
+  const shortcutTitle = (label: string, action: keyof typeof keyboardPresets.ue.keys) => {
+    const key = keyboardPresets[keyboardPreset].keys[action];
+    return key ? `${label} (${key})` : label;
+  };
   const [displayMode, setDisplayMode] = useState<"frames" | "seconds">(initialViewState?.displayMode === "seconds" || initialViewState?.displayMode === "frames" ? initialViewState.displayMode : initialDisplayMode);
   const [scroll, setScroll] = useState({ left: 0, top: 0 });
   const [viewport, setViewport] = useState<CanvasViewport>({ width: 0, height: 0 });
@@ -605,7 +614,7 @@ export function TimelineEditor({
   const [rowZoom, setRowZoom] = useState(() => clampRowZoom(initialViewState?.rowZoom ?? 1));
   const viewStateCallback = useRef(onViewStateChange);
   useEffect(() => { viewStateCallback.current = onViewStateChange; }, [onViewStateChange]);
-  useEffect(() => { viewStateCallback.current?.({ treeWidth, pixelsPerSecond: zoomPixelsPerSecond, rowZoom, snap, displayMode, viewExtent }); }, [treeWidth, zoomPixelsPerSecond, rowZoom, snap, displayMode, viewExtent]);
+  useEffect(() => { viewStateCallback.current?.({ treeWidth, pixelsPerSecond: zoomPixelsPerSecond, rowZoom, snap, displayMode, viewExtent, keyboardPreset }); }, [treeWidth, zoomPixelsPerSecond, rowZoom, snap, displayMode, viewExtent, keyboardPreset]);
   // A scrollLeft to apply after the next commit — set together with a zoom
   // change so the browser clamps it against the NEW content width, not the
   // one still in the DOM at event time.
@@ -638,6 +647,23 @@ export function TimelineEditor({
   const colors = useCanvasTheme(rootRef);
   const playheadRef = useRef<HTMLDivElement>(null);
   const readoutRef = useRef<HTMLButtonElement>(null);
+  const settingsRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const closeOutside = (event: Event) => {
+      const settings = settingsRef.current;
+      if (settings?.open && event.target instanceof Node && !settings.contains(event.target)) settings.open = false;
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("focusin", closeOutside);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("focusin", closeOutside);
+    };
+  }, []);
+  const [timeDraft, setTimeDraft] = useState<string | null>(null);
+  const timeInputRef = useRef<HTMLInputElement>(null);
+  const editingTime = timeDraft !== null;
+  useEffect(() => { if (editingTime) { timeInputRef.current?.focus(); timeInputRef.current?.select(); } }, [editingTime]);
   const rowHeightProbeRef = useRef<HTMLDivElement>(null);
   const tickWidthProbeRef = useRef<HTMLSpanElement>(null);
   const [selectedTarget, setSelectedTarget] = useState<TimelinePlaybackTarget | null>(null);
@@ -914,16 +940,14 @@ export function TimelineEditor({
     }
   }, [commandTarget, fps, onDiagnostic, playbackController, playbackSnapshot.available, playbackRange]);
 
+  const currentReadoutTime = () => playbackController && playbackSnapshot.available ? projectTimelinePlaybackTime(playbackSnapshot) : time;
+
   const stepFrame = useCallback((direction: -1 | 1) => {
     const stepped = resolveTimelineSeekTime(time + direction / fps, playbackRange, "frame-snap", fps);
     seekTo(stepped);
   }, [fps, playbackRange, seekTo, time]);
 
-  /**
-   * ArrowLeft/ArrowRight step the playhead one frame while the timeline has
-   * focus. Bound only to the track viewport (not window/document), so typing
-   * arrow keys in an unrelated input elsewhere in the host app is untouched.
-   */
+  /** Preset transport shortcuts stay scoped to the timeline and exclude host controls. */
   const onViewportKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape" && editDrag.current) {
       const pointer = editDrag.current.pointer;
@@ -940,17 +964,19 @@ export function TimelineEditor({
     }
     if (target.closest(".timeline-editor__inspector, .timeline-editor__sidebar") || target.isContentEditable || target.closest("input, textarea, select, button") || event.defaultPrevented) return;
     if (clipEditing.onKeyDown(event)) return;
-    if (duration <= 0 || event.altKey || event.metaKey) return;
-    const key = event.key.toLowerCase();
+    if (duration <= 0) return;
+    const action = keyboardAction(keyboardPreset, event);
     const transport = (type: "play" | "pause") => dispatchSafely(playbackController, { type, target: commandTarget }, onDiagnostic);
-    if (event.ctrlKey && key !== "arrowup") return;
-    if (key === " ") { if (!event.repeat) transport(playbackSnapshot.playing ? "pause" : "play"); }
-    else if (key === "arrowdown") transport("play");
-    else if (key === "k") transport("pause");
-    else if (key === "arrowup") seekTo(event.ctrlKey ? playbackRange.end : playbackRange.start);
-    else if (key === "arrowleft" && !event.ctrlKey) stepFrame(-1);
-    else if (key === "arrowright" && !event.ctrlKey) stepFrame(1);
-    else if (key === "home") { setViewExtent(null); setZoomPixelsPerSecond(null); if (timelineViewportRef.current) timelineViewportRef.current.scrollLeft = 0; }
+    if (action === "toggle") { if (!event.repeat) transport(playbackSnapshot.playing ? "pause" : "play"); }
+    else if (action === "play") transport("play");
+    else if (action === "pause") transport("pause");
+    else if (action === "start") seekTo(playbackRange.start);
+    else if (action === "end") seekTo(playbackRange.end);
+    else if (action === "previous") stepFrame(-1);
+    else if (action === "next") stepFrame(1);
+    else if (action === "stopOrStart") { if (!event.repeat) { if (playbackSnapshot.playing) transport("pause"); else seekTo(playbackRange.start); } }
+    else if (action === "loop") { if (!event.repeat) dispatchTransport({ type: "setLooping", looping: !playbackSnapshot.looping }); }
+    else if (action === "fit") { setViewExtent(null); setZoomPixelsPerSecond(null); if (timelineViewportRef.current) timelineViewportRef.current.scrollLeft = 0; }
     else return;
     event.preventDefault();
   };
@@ -1319,21 +1345,21 @@ export function TimelineEditor({
           )}
           <div className="timeline-editor__slot">{slots?.toolbarStart}</div>
           <div className="timeline-editor__transport" role="group" aria-label="Playback controls">
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Skip to start (Up)" aria-label="Skip to start" onClick={() => seekTo(playbackRange.start)}><SkipPreviousIcon /></button>
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Previous frame (Left)" aria-label="Previous frame" onClick={() => stepFrame(-1)}><NavigateBeforeIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title={shortcutTitle("Skip to start", "start")} aria-label="Skip to start" onClick={() => seekTo(playbackRange.start)}><SkipPreviousIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title={shortcutTitle("Previous frame", "previous")} aria-label="Previous frame" onClick={() => stepFrame(-1)}><NavigateBeforeIcon /></button>
             <button
               type="button"
               className="timeline-editor__button"
               disabled={!canTransport}
-              title="Play / Pause (Space)"
+              title={shortcutTitle("Play / Pause", "toggle")}
               aria-label={playbackSnapshot.playing ? "Pause" : "Play"}
               onClick={() => dispatchTransport(playbackSnapshot.playing ? { type: "pause" } : { type: "play" })}
             >
               {playbackSnapshot.playing ? <PauseIcon /> : <PlayIcon />}
             </button>
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Next frame (Right)" aria-label="Next frame" onClick={() => stepFrame(1)}><NavigateNextIcon /></button>
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Skip to end (Ctrl+Up)" aria-label="Skip to end" onClick={() => seekTo(playbackRange.end)}><SkipNextIcon /></button>
-            <button type="button" className={`timeline-editor__button${playbackSnapshot.looping ? " is-active" : ""}`} disabled={!canTransport} title="Toggle loop playback" aria-label="Loop" onClick={() => dispatchTransport({ type: "setLooping", looping: !playbackSnapshot.looping })}><RepeatIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title={shortcutTitle("Next frame", "next")} aria-label="Next frame" onClick={() => stepFrame(1)}><NavigateNextIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title={shortcutTitle("Skip to end", "end")} aria-label="Skip to end" onClick={() => seekTo(playbackRange.end)}><SkipNextIcon /></button>
+            <button type="button" className={`timeline-editor__button${playbackSnapshot.looping ? " is-active" : ""}`} disabled={!canTransport} title={shortcutTitle("Toggle loop playback", "loop")} aria-label="Loop" onClick={() => dispatchTransport({ type: "setLooping", looping: !playbackSnapshot.looping })}><RepeatIcon /></button>
             <button
               type="button"
               className={`timeline-editor__button timeline-editor__button--rate${playbackRate !== 1 ? " is-active" : ""}`}
@@ -1344,7 +1370,47 @@ export function TimelineEditor({
               {formatTimelineRate(playbackRate)}
             </button>
           </div>
-          <button ref={readoutRef} type="button" className="timeline-editor__readout" onClick={() => setDisplayMode((mode) => mode === "frames" ? "seconds" : "frames")} title="Switch frames / seconds" aria-label="Toggle time display">{playbackReadout}</button>
+          {timeDraft === null ? (
+            <button ref={readoutRef} type="button" className="timeline-editor__readout"
+              disabled={Boolean(playbackController && !playbackSnapshot.available)}
+              onDoubleClick={() => setTimeDraft(String(displayMode === "frames" ? Math.round(currentReadoutTime() * fps) : currentReadoutTime()))}
+              onKeyDown={event => { if (event.key === "Enter" || event.key === "F2") { event.preventDefault(); setTimeDraft(String(displayMode === "frames" ? Math.round(currentReadoutTime() * fps) : currentReadoutTime())); } }}
+              title="Double-click to enter current time" aria-label="Current time">{playbackReadout}</button>
+          ) : (
+            <input ref={timeInputRef} className="timeline-editor__readout timeline-editor__time-input" type="number"
+              aria-label={displayMode === "frames" ? "Current frame" : "Current seconds"}
+              step={displayMode === "frames" ? 1 : 1 / fps} value={timeDraft}
+              onChange={event => setTimeDraft(event.target.value)} onBlur={() => setTimeDraft(null)}
+              onKeyDown={event => {
+                event.stopPropagation();
+                if (event.key === "Escape") { event.preventDefault(); setTimeDraft(null); }
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  const value = Number(timeDraft);
+                  if (timeDraft.trim() !== "" && Number.isFinite(value)) {
+                    seekTo(displayMode === "frames" ? value / fps : value);
+                    setTimeDraft(null);
+                  }
+                }
+              }} />
+          )}
+          <details ref={settingsRef} className="timeline-editor__settings" onKeyDown={event => {
+            event.stopPropagation();
+            if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); }
+          }}>
+            <summary className="timeline-editor__button" aria-label="Timeline settings" title="Timeline settings">⚙</summary>
+            <div className="timeline-editor__settings-panel" style={{ maxHeight: viewport.height }}>
+              <span className="timeline-editor__settings-heading">Controls</span>
+              <label>Keyboard preset
+                <select aria-label="Keyboard preset" value={keyboardPreset} onChange={event => setKeyboardPreset(normalizeKeyboardPreset(event.target.value))}>
+                  {Object.entries(keyboardPresets).map(([value, preset]) => <option key={value} value={value}>{preset.label}</option>)}
+                </select>
+              </label>
+              <small className="timeline-editor__shortcut-help">Play / Pause: {keyboardPresets[keyboardPreset].keys.toggle}<br />
+                {keyboardPresets[keyboardPreset].keys.previous ? `Frame: ${keyboardPresets[keyboardPreset].keys.previous} / ${keyboardPresets[keyboardPreset].keys.next}` : "Enter: Stop / return · C: Loop"}
+              </small>
+              <span className="timeline-editor__settings-heading">Display</span>
+              <button type="button" className="timeline-editor__button timeline-editor__button--text" onClick={() => setDisplayMode(mode => mode === "frames" ? "seconds" : "frames")} aria-label="Toggle time display" title="Switch frames / seconds">{displayMode === "frames" ? "Frames" : "Seconds"} ⇄</button>
           {frameRateOptions ? (
             <select
               className="timeline-editor__fps timeline-editor__fps-select"
@@ -1357,6 +1423,41 @@ export function TimelineEditor({
           ) : (
             <span className="timeline-editor__fps">{fps} fps</span>
           )}
+              <span className="timeline-editor__settings-heading">Playback</span>
+              {(["start", "end"] as const).map(edge => {
+                const displayed = displayMode === "frames" ? Math.round(playbackRange[edge] * fps) : playbackRange[edge];
+                return <label key={edge}> {edge === "start" ? "Start" : "End"} ({displayMode === "frames" ? "f" : "s"})
+                  <input key={`${displayed}:${displayMode}:${fps}`} type="number" aria-label={`Playback ${edge} time`}
+                    defaultValue={displayed} step={displayMode === "frames" ? 1 : 1 / fps}
+                    disabled={!canTransport || !onChangePlaybackRange}
+                    onBlur={event => { event.currentTarget.value = String(displayed); }}
+                    onKeyDown={event => {
+                      event.stopPropagation();
+                      if (event.key === "Escape") { event.preventDefault(); event.currentTarget.value = String(displayed); event.currentTarget.blur(); }
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        const raw = event.currentTarget.value;
+                        const value = Number(raw);
+                        const seconds = displayMode === "frames" ? Math.round(value) / fps : Math.round(value * fps) / fps;
+                        if (raw.trim() && Number.isFinite(seconds)) {
+                          const next = edge === "start"
+                            ? { start: Math.min(seconds, playbackRange.end - 1 / fps), end: playbackRange.end }
+                            : { start: playbackRange.start, end: Math.max(seconds, playbackRange.start + 1 / fps) };
+                          if (next[edge] !== playbackRange[edge]) onChangePlaybackRange?.(next);
+                          event.currentTarget.blur();
+                        }
+                      }
+                    }} />
+                </label>;
+              })}
+              <label>Speed
+                <select aria-label="Playback speed" disabled={!canTransport} value={playbackRate}
+                  onChange={event => dispatchTransport({ type: "setRate", rate: Number(event.target.value) })}>
+                  {Array.from(new Set<number>([...TIMELINE_RATE_STEPS, playbackRate])).sort((a, b) => a - b).map(rate => <option key={rate} value={rate}>{formatTimelineRate(rate)}</option>)}
+                </select>
+              </label>
+            </div>
+          </details>
           {editing && <button type="button" className="timeline-editor__button timeline-editor__button--text" aria-label="Snap to frames" aria-pressed={snap} title="Snap to frames · Alt-drag to bypass" onClick={() => setSnap(!snap)}>Snap</button>}
           <div className="timeline-editor__slot timeline-editor__slot--end">{slots?.toolbarEnd}
             {sidebar && <button type="button" className="timeline-editor__button timeline-editor__sidebar-toggle" aria-label={`Toggle ${sidebar.title}`} title={`Toggle ${sidebar.title}`} aria-controls={sidebarId} aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(open => !open)}>{sidebar.title}</button>}

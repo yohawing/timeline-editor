@@ -268,6 +268,7 @@ describe("TimelineEditor transport and interaction boundary", () => {
         onFrameRateChange={onFrameRateChange}
       />,
     );
+    fireEvent.click(screen.getByLabelText("Timeline settings"));
     const picker = screen.getByRole("combobox", { name: "Frame rate" }) as HTMLSelectElement;
     expect(picker.value).toBe("auto");
     expect(screen.queryByText("30 fps")).toBeNull();
@@ -429,7 +430,7 @@ it("restores view preferences and does not emit again when only callback identit
   const changed = vi.fn();
   const dataSource = source();
   const { rerender } = render(<TimelineEditor dataSource={dataSource} initialViewState={{ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds" }} onViewStateChange={state => changed(state)} />);
-  expect(changed).toHaveBeenLastCalledWith({ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds", viewExtent: null });
+  expect(changed).toHaveBeenLastCalledWith({ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds", viewExtent: null, keyboardPreset: "ue" });
   changed.mockClear();
   rerender(<TimelineEditor dataSource={dataSource} onViewStateChange={state => changed(state)} />);
   expect(changed).not.toHaveBeenCalled();
@@ -553,3 +554,61 @@ it("opens the host sidebar on item double-click and leaves its shortcuts host-ow
   fireEvent.click(screen.getByRole("button", { name: "Close Properties" }));
   expect(screen.queryByRole("complementary", { name: "Properties" })).toBeNull();
 });
+
+ it("seeks typed frames through the transport and cancels drafts", () => {
+    const playback = controller();
+    render(<TimelineEditor dataSource={source()} frameRate={30} playbackController={playback} />);
+    fireEvent.doubleClick(screen.getByRole("button", { name: "Current time" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Current frame" }), { target: { value: "75" } });
+    fireEvent.keyDown(screen.getByRole("spinbutton", { name: "Current frame" }), { key: "Enter" });
+    expect(playback.dispatch).toHaveBeenCalledWith({ type: "seek", time: 2.5, target });
+    playback.dispatch.mockClear();
+    fireEvent.doubleClick(screen.getByRole("button", { name: "Current time" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Current frame" }), { target: { value: "90" } });
+    fireEvent.keyDown(screen.getByRole("spinbutton", { name: "Current frame" }), { key: "Escape" });
+    expect(playback.dispatch).not.toHaveBeenCalled();
+  });
+
+ it.each([
+   ["ue", "ArrowRight", false], ["unity", ".", false], ["maya", ".", true],
+ ] as const)("uses %s transport keys without consuming modified host keys", (preset, key, altKey) => {
+   const playback = controller();
+   render(<TimelineEditor dataSource={source()} frameRate={30} playbackController={playback} initialViewState={{ keyboardPreset: preset }} />);
+   const viewport = screen.getByRole("application", { name: "Timeline scrubber" });
+   fireEvent.keyDown(viewport, { key, altKey });
+   expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 31 / 30, target });
+   playback.dispatch.mockClear();
+   fireEvent.keyDown(viewport, { key, altKey, ctrlKey: true });
+   expect(playback.dispatch).not.toHaveBeenCalled();
+ });
+ it("uses Logic loop and return keys and reports preset changes for host persistence", () => {
+   const playback = controller(); const changed = vi.fn();
+   render(<TimelineEditor dataSource={source()} playbackController={playback} onViewStateChange={changed} />);
+   fireEvent.change(screen.getByLabelText("Keyboard preset"), { target: { value: "logic" } });
+   expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ keyboardPreset: "logic" }));
+   const viewport = screen.getByRole("application", { name: "Timeline scrubber" });
+   fireEvent.keyDown(viewport, { key: "c" });
+   expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "setLooping", looping: true, target });
+   fireEvent.keyDown(viewport, { key: "Enter" });
+   expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 0, target });
+ });
+ it("commits range settings once, preserves a frame interval, and dispatches speed", () => {
+   const playback = controller(); const changed = vi.fn();
+   render(<TimelineEditor dataSource={source()} frameRate={30} playbackController={playback} onChangePlaybackRange={changed} />);
+   const start = screen.getByLabelText("Playback start time");
+   fireEvent.change(start, { target: { value: "400" } });
+   fireEvent.keyDown(start, { key: "Enter" });
+   expect(changed).toHaveBeenCalledExactlyOnceWith({ start: 10 - 1 / 30, end: 10 });
+   fireEvent.change(screen.getByLabelText("Playback speed"), { target: { value: "0.5" } });
+   expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "setRate", rate: 0.5, target });
+ });
+ it("seeks seconds with clamping and ignores empty numeric drafts", () => {
+   const playback = controller();
+   render(<TimelineEditor dataSource={source()} playbackController={playback} displayMode="seconds" />);
+   fireEvent.doubleClick(screen.getByRole("button", { name: "Current time" }));
+   const input = screen.getByRole("spinbutton", { name: "Current seconds" });
+   fireEvent.change(input, { target: { value: "" } }); fireEvent.keyDown(input, { key: "Enter" });
+   expect(playback.dispatch).not.toHaveBeenCalled();
+   fireEvent.change(input, { target: { value: "100" } }); fireEvent.keyDown(input, { key: "Enter" });
+   expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 10, target });
+ });

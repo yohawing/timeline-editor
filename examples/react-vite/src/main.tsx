@@ -50,7 +50,7 @@ function Example(): JSX.Element {
   const stress = params.get("stress") === "1";
   const variant = params.get("variant") === "compact" ? "compact" : "full";
   const requestedFps = Number(params.get("fps") ?? 24);
-  const fps = Number.isFinite(requestedFps) && requestedFps > 0 ? requestedFps : 24;
+  const [fps, setFps] = useState(Number.isFinite(requestedFps) && requestedFps > 0 ? requestedFps : 24);
   const [displayMode, setDisplayMode] = useState<"frames" | "seconds">(preferences.initial.timeline?.displayMode === "seconds" ? "seconds" : "frames");
   const onViewStateChange = useCallback((state: TimelineViewState) => {
     setDisplayMode(state.displayMode);
@@ -95,6 +95,9 @@ function Example(): JSX.Element {
           showTitle={false}
           playbackController={audio.controller}
           frameRate={fps}
+          frameRateOptions={Array.from(new Set([24, 25, 30, 48, 50, 60, fps])).sort((a, b) => a - b).map(rate => ({ value: String(rate), label: `${rate} fps` }))}
+          frameRateValue={String(fps)}
+          onFrameRateChange={value => setFps(Number(value))}
           variant={variant}
           slots={{ toolbarEnd: <select aria-label="Theme" title="Theme" value={theme} onChange={event => setTheme(event.target.value as "dark" | "light")}><option value="dark">Dark</option><option value="light">Light</option></select>, inspector: audio.properties, toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack, rowActions: audio.rowActions, rowIcon: audio.rowIcon }}
           onDiagnostic={(diagnostic) => console.warn(diagnostic.message, diagnostic.error)}

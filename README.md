@@ -32,7 +32,7 @@ Wheel over the ruler or the tracks: **wheel** zooms the time axis around the poi
 
 ### Frame-rate picker
 
-`frameRateOptions` (`{ value: string; label: string }[]`) turns the toolbar's read-only "N fps" label into a `<select>`; `frameRateValue` names the current choice and `onFrameRateChange(value)` reports a pick. Values are opaque strings so a host can offer an "auto" entry next to numbers; `frameRate` remains the number used for display and frame snapping.
+`frameRateOptions` (`{ value: string; label: string }[]`) turns the settings menu's read-only "N fps" label into a `<select>`; `frameRateValue` names the current choice and `onFrameRateChange(value)` reports a pick. Values are opaque strings so a host can offer an "auto" entry next to numbers; `frameRate` remains the number used for display and frame snapping.
 
 ### Playback rate
 
@@ -303,3 +303,22 @@ Legacy `--timeline-canvas-*` overrides remain supported and take precedence over
 the corresponding shared `--timeline-*` color token for Canvas painting.
 
 Hosts can set `allowViewOutsideRange={false}` to bound time-axis zoom and pan to `dataSource.getRange()`, while keeping loop In/Out independently editable. The default remains unrestricted browsing.
+
+### Timeline settings and numeric navigation
+
+Open the gear button for frame/second display, FPS, playback start/end, and playback speed. FPS choices and range edits use the existing host callbacks (`onFrameRateChange`, `onChangePlaybackRange`); unavailable controls stay disabled. Range input commits with Enter, snaps to a frame, and preserves at least one frame between start and end.
+
+Double-click the current-time readout (or focus it and press Enter/F2) to enter a frame number or seconds in the selected display mode. Enter seeks through the existing playback controller, with frame snapping and playback-range clamping. Escape or leaving the field cancels the edit. A controller-free timeline updates its local playhead.
+
+### Keyboard presets
+
+The gear menu offers UE (default), Unity, Maya, and Logic inspired transport keyboard presets. Set `initialViewState.keyboardPreset` to `"ue" | "unity" | "maya" | "logic"`; `onViewStateChange` reports changes for host persistence. Existing mouse gestures, editing shortcuts, and host input controls retain their behavior. Tooltips and the settings hint show the active keys.
+
+| Preset | Play / pause | Previous / next frame | Other transport keys |
+| --- | --- | --- | --- |
+| UE | Space | Left / Right | Down: play, K: pause, Up / Ctrl+Up: start / end |
+| Unity | Space | comma / period | — |
+| Maya | Alt+V | Alt+comma / Alt+period | Alt+Shift+V: start |
+| Logic | Space | Toolbar buttons | Enter: stop while playing, return to start when stopped; Shift+Enter: start; C: loop |
+
+Home fits the timeline in every preset. These are limited transport presets: Logic musical bar navigation and application-specific tools are not emulated. References: [UE playback options](https://dev.epicgames.com/documentation/en-us/unreal-engine/sequencer-cinematic-toolbar-in-unreal-engine), [Unity playback controls](https://docs.unity3d.com/Packages/com.unity.timeline@1.8/manual/tl-play-ctrls.html), [Maya shortcuts](https://www.autodesk.com/shortcuts/maya), [Logic transport](https://help.apple.com/logicpro/mac/9.1.6/en/logicpro/usermanual/chapter_5_section_2.html).

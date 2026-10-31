@@ -10,7 +10,7 @@ test("playback handles preview, commit once, cancel, and restore after reload", 
   await page.mouse.move(box.x + 4, box.y + 6); await page.mouse.down();
   await page.mouse.move(box.x + 4 - width / 3, box.y + 6, { steps: 5 });
   await expect(end).toHaveAttribute("aria-valuetext", "192 f");
-  await expect(page.getByRole("button", { name: "Toggle time display" })).toContainText("0288");
+  await expect(page.getByRole("button", { name: "Current time" })).toContainText("0288");
   await page.mouse.up(); await expect(out).toHaveAttribute("aria-valuetext", "192 f");
   await page.getByRole("button", { name: "Undo", exact: true }).click(); await expect(out).toHaveAttribute("aria-valuetext", "288 f");
   await page.getByRole("button", { name: "Redo", exact: true }).click(); await expect(out).toHaveAttribute("aria-valuetext", "192 f");

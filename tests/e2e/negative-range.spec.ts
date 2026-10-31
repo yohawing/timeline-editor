@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 for (const width of [320,1000]) test(`negative range transport and view ${width}`, async ({page}) => {
   await page.setViewportSize({width,height:600});
   await page.goto("/ruler.html?start=-60&frames=150");
-  const readout=page.getByRole("button",{name:"Toggle time display"});
+  const readout=page.getByRole("button",{name:"Current time"});
   await expect(readout).toContainText("-0060 / 0090");
   await expect(page.locator(".timeline-editor__tick").filter({hasText:/^-/}).first()).toBeVisible();
   await page.getByRole("button",{name:"Next frame"}).click();
@@ -15,6 +15,8 @@ for (const width of [320,1000]) test(`negative range transport and view ${width}
   await page.mouse.move(ruler!.x+ruler!.width/2,ruler!.y+4);
   await page.mouse.wheel(0,-500);
   await expect.poll(() => page.locator(".timeline-editor__range-thumb").evaluate(el => el.getBoundingClientRect().width)).toBeLessThan(ruler!.width);
-  await readout.click();
+  await page.getByLabel("Timeline settings").click();
+  await page.getByRole("button", { name: "Toggle time display" }).click();
+  await page.getByLabel("Timeline settings").click();
   await expect(readout).toContainText("-2.00 / 3.00 s");
 });
