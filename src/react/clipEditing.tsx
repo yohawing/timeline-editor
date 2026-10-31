@@ -127,6 +127,7 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
       }
     }
     return <div key={clip.id} role="button" tabIndex={0} aria-label={`Clip ${clip.label}`} aria-pressed={editing.selectedClipId === clip.id}
+      data-clipped-start={left > x || undefined} data-clipped-end={right < x + duration * scale || undefined}
       data-clip-id={clip.id} data-start={start} data-end={start + duration} data-row-id={moving?.rowId ?? clip.rowId}
       className={`timeline-editor__editable-clip${clip.disabled ? " is-disabled" : ""}${editing.selectedClipId === clip.id ? " is-selected" : ""}`}
       title={`${clip.label}${clip.disabled ? " (Disabled)" : ""} · ${formatTime(start)} — ${formatTime(start + duration)}`}
