@@ -37,3 +37,34 @@ it("renders both waveform contracts with the same source-time offset and loop", 
   expect(path()).toBe(arrayPath);
   cleanup();
 });
+
+
+it.each([false, true])("moves before the view only when opted in: %s", (allowMoveBeforeRange) => {
+  const element = document.createElement("div");
+  element.setPointerCapture = vi.fn(); element.hasPointerCapture = () => false;
+  const source = createFixtureTimelineDataSource();
+  const row = source.getRows({ start: 0, count: 1 })[0];
+  const clip = { kind: "clip" as const, id: "negative" as import("../core/contracts").ClipId, rowId: row.id, label: "audio", range: { start: 0, end: 10 } };
+  const editing: TimelineEditing = { selectedClipId: clip.id, allowMoveBeforeRange, canEditClip: () => true, canDropFiles: () => true,
+    onSelectClip: vi.fn(), onMoveClip: vi.fn(), onDropFiles: vi.fn(), onDelete: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() };
+  const { result, unmount } = renderHook(() => useClipEditing({ editing, dataSource: { ...source, getItems: query => clip.range.end >= query.range.start && clip.range.start <= query.range.end ? [clip] : [] }, viewport: { current: element }, scale: 100, rowHeight: 26,
+    range: { start: 0, end: 10 }, fps: 30, snap: true, scrollLeft: 0, width: 1000 }));
+  const pointer = (clientX: number) => ({ button: 0, pointerId: 1, clientX, clientY: 10, target: element, currentTarget: element, preventDefault() {}, stopPropagation() {} }) as unknown as import("react").PointerEvent<HTMLDivElement>;
+  act(() => result.current.renderClip(clip, 0)!.props.onPointerDown(pointer(200)));
+  act(() => result.current.renderClip(clip, 0)!.props.onPointerMove(pointer(-100)));
+  act(() => result.current.renderClip(clip, 0)!.props.onPointerUp(pointer(-100)));
+  expect(editing.onMoveClip).toHaveBeenLastCalledWith(clip.id, row.id, allowMoveBeforeRange ? -3 : 0);
+  if (allowMoveBeforeRange) {
+    clip.range = { start: -3, end: 7 };
+    act(() => result.current.renderClip(clip, 0)!.props.onPointerDown(pointer(100)));
+    act(() => result.current.renderClip(clip, 0)!.props.onPointerMove(pointer(200)));
+    act(() => result.current.renderClip(clip, 0)!.props.onPointerUp(pointer(200)));
+    expect(editing.onMoveClip).toHaveBeenLastCalledWith(clip.id, row.id, -2);
+    act(() => result.current.onKeyDown({ key: "ArrowLeft", ctrlKey: true, preventDefault() {}, stopPropagation() {} } as import("react").KeyboardEvent));
+    expect(editing.onMoveClip).toHaveBeenLastCalledWith(clip.id, row.id, -3 - 1 / 30);
+    clip.range = { start: -30, end: -20 };
+    act(() => result.current.onKeyDown({ key: "ArrowRight", ctrlKey: true, preventDefault() {}, stopPropagation() {} } as import("react").KeyboardEvent));
+    expect(editing.onMoveClip).toHaveBeenLastCalledWith(clip.id, row.id, -30 + 1 / 30);
+  }
+  unmount();
+});

@@ -4,6 +4,8 @@ import type { ClipId, RowId, TimeRange, TimelineClip, TimelineDataSource } from 
 /** Optional controlled editing. The host owns data, audio and undo history. */
 export interface TimelineEditing {
   selectedClipId: ClipId | null;
+  /** Allow moving a clip before the visible range without changing view bounds. */
+  allowMoveBeforeRange?: boolean;
   canEditClip(clip: TimelineClip): boolean;
   canDropFiles(rowId: RowId): boolean;
   /** Defaults to the original row; file-drop eligibility is independent. */
@@ -30,9 +32,13 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
   const previewRef = useRef(preview);
   const set = (value: typeof preview) => { previewRef.current = value; setPreview(value); };
   const latestStart = Math.max(range.start, range.end - 1 / fps);
-  const timeAt = (clientX: number, bypass = false, limit = latestStart) => {
+  const moveStart = (start: number) => Math.max(editing?.allowMoveBeforeRange ? -Infinity : range.start, Math.min(latestStart, start));
+  const pointerTime = (clientX: number) => {
     const element = viewport.current;
-    const raw = range.start + (clientX - (element?.getBoundingClientRect().left ?? 0) + (element?.scrollLeft ?? 0)) / scale;
+    return range.start + (clientX - (element?.getBoundingClientRect().left ?? 0) + (element?.scrollLeft ?? 0)) / scale;
+  };
+  const timeAt = (clientX: number, bypass = false, limit = latestStart) => {
+    const raw = pointerTime(clientX);
     return Math.min(limit, Math.max(range.start, snap && !bypass ? Math.round(raw * fps) / fps : raw));
   };
   const rowAt = (clientY: number) => {
@@ -45,7 +51,7 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
     drag.current = null; set(null);
     if (current?.element.hasPointerCapture(current.pointer)) current.element.releasePointerCapture(current.pointer);
   };
-  const selectedClip = () => dataSource.getItems({ rowIds: dataSource.getRows({ start: 0, count: dataSource.getRowCount() }).map(row => row.id), range })
+  const selectedClip = () => dataSource.getItems({ rowIds: dataSource.getRows({ start: 0, count: dataSource.getRowCount() }).map(row => row.id), range: editing?.allowMoveBeforeRange ? { start: -Number.MAX_VALUE, end: range.end } : range })
     .find((item): item is TimelineClip => item.kind === "clip" && item.id === editing?.selectedClipId);
   const onKeyDown = (event: KeyboardEvent) => {
     if (!editing) return false;
@@ -58,7 +64,7 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
     else if (event.key === "Delete" || event.key === "Backspace") editing.onDelete();
     else if (modifier && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
       const clip = selectedClip();
-      if (clip && editing.canEditClip(clip)) editing.onMoveClip(clip.id, clip.rowId, Math.max(range.start, Math.min(latestStart, clip.range.start + (event.key === "ArrowLeft" ? -1 : 1) / fps)));
+      if (clip && editing.canEditClip(clip)) editing.onMoveClip(clip.id, clip.rowId, moveStart(clip.range.start + (event.key === "ArrowLeft" ? -1 : 1) / fps));
     } else handled = false;
     if (handled) { event.preventDefault(); event.stopPropagation(); }
     return handled;
@@ -132,7 +138,7 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
         event.preventDefault(); event.stopPropagation(); viewport.current?.focus(); editing.onSelectClip(clip.id);
         const edge = (event.target as HTMLElement).closest<HTMLElement>("[data-trim-edge]")?.dataset.trimEdge;
         const mode = editing.onResizeClip && (edge === "start" || edge === "end") ? edge : "move";
-        drag.current = { mode, id: clip.id, rowId: clip.rowId, start: clip.range.start, offset: timeAt(event.clientX, true) - clip.range.start, pointer: event.pointerId, element: event.currentTarget };
+        drag.current = { mode, id: clip.id, rowId: clip.rowId, start: clip.range.start, offset: (editing.allowMoveBeforeRange ? pointerTime(event.clientX) : timeAt(event.clientX, true)) - clip.range.start, pointer: event.pointerId, element: event.currentTarget };
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onPointerMove={(event) => {
@@ -147,8 +153,8 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
           set({ rowId: clip.rowId, start, end, label: `${formatTime(start)} — ${formatTime(end)}` });
           return;
         }
-        const raw = timeAt(event.clientX, true) - current.offset;
-        const next = Math.max(range.start, Math.min(latestStart, snap && !event.altKey ? Math.round(raw * fps) / fps : raw));
+        const raw = (editing.allowMoveBeforeRange ? pointerTime(event.clientX) : timeAt(event.clientX, true)) - current.offset;
+        const next = moveStart(snap && !event.altKey ? Math.round(raw * fps) / fps : raw);
         const row = rowAt(event.clientY);
         set({ rowId: row && (editing.canMoveClip?.(clip, row.id) ?? row.id === clip.rowId) ? row.id : current.rowId, start: next, label: `${formatTime(next)}` });
       }}
@@ -169,6 +175,6 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
     </div>;
   };
   const rowIndex = preview ? dataSource.getRows({ start: 0, count: dataSource.getRowCount() }).findIndex(row => row.id === preview.rowId) : -1;
-  const indicator = preview && <div className="timeline-editor__drop-preview" style={{ left: (preview.start - range.start) * scale, top: rowIndex * rowHeight, height: rowHeight }}><span>{preview.label}</span></div>;
+  const indicator = preview && <div className="timeline-editor__drop-preview" style={{ left: Math.max(scrollLeft, (preview.start - range.start) * scale), top: rowIndex * rowHeight, height: rowHeight }}><span>{preview.label}</span></div>;
   return { handlers, renderClip, indicator, onKeyDown };
 }
