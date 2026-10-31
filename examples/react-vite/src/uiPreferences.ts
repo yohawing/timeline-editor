@@ -24,5 +24,10 @@ export function useUiPreferences() {
   }, []);
   const saveTimeline = useCallback((timeline: TimelineViewState) => save({ timeline }), [save]);
   const saveRatio = useCallback((previewRatio: number) => save({ previewRatio }), [save]);
-  return { initial: initial.current, saveTimeline, saveRatio };
+  const reset = useCallback(() => {
+    initial.current = {};
+    current.current = {};
+    try { localStorage.removeItem(KEY); } catch { /* In-memory reset still works. */ }
+  }, []);
+  return { initial: initial.current, saveTimeline, saveRatio, reset };
 }

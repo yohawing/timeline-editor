@@ -353,3 +353,11 @@ Hosts can initialize `initialViewState.autoScroll`; changes are reported through
 The standalone demo enables transport and view shortcuts across the document, so playback and frame stepping work on initial load and with the preview focused. Playback toolbar buttons also allow these shortcuts; Enter still activates the focused button. Numeric/text inputs, settings, inspectors, editable content and host controls keep their own keyboard behavior. Editing shortcuts (delete, undo, clip nudges) remain local to the timeline.
 
 The reusable component defaults to `shortcutScope="editor"`. A single-editor host can opt into `shortcutScope="document"`; it does not steal focus or forward keys to another DOM element. Already-handled and IME composition events are ignored, and focused timeline instances handle their own keys. Hosts with multiple editors should keep editor scope or enable document scope only on the active editor.
+
+### Demo reset controls
+
+**Reset UI settings** in settings restores the default operation preset, time display, 24 FPS, dark theme, zoom, snapping, auto scroll, pane sizes and expanded groups. It keeps the current project, imported audio and Undo/Redo history; no reload is needed.
+
+**Reset project** in the header confirms before replacing the current demo project with its initial tracks and clips. Display preferences are retained. Reset is saved through the normal project persistence path, pending audio imports are invalidated, and Undo can restore the previous project until the page is closed. The normal and stress projects remain separate.
+
+Demo track colors distinguish Animation (blue) from Group (neutral gray); Audio stays teal and Event stays amber. Hosts continue to own their row and clip colors.

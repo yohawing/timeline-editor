@@ -29,9 +29,9 @@ export function clickTrack(): ArrayBuffer {
 
 
 const trackTypes = {
-  group: { label: "Group", color: "#a5a9b3", targetKind: "actor" },
+  group: { label: "Group", color: "#9b9b9b", targetKind: "actor" },
   audio: { label: "Audio", color: "#55bca9", targetKind: "audio-output" },
-  animation: { label: "Animation", color: "#8592d0", targetKind: "actor" },
+  animation: { label: "Animation", color: "#589aee", targetKind: "actor" },
   event: { label: "Event", color: "#dbb56e", targetKind: "property" },
 } as const;
 type TrackType = keyof typeof trackTypes;
@@ -84,7 +84,8 @@ export function withAudioRows(base: TimelineDataSource, document: Document, coll
 export function useAudioDemo(controller: TimelinePlaybackController, motion: TimelineClip | null, timeDisplay: { displayMode: "frames" | "seconds"; fps: number }) {
   const timeDisplayRef = useRef(timeDisplay); timeDisplayRef.current = timeDisplay;
   const formatTime = (seconds: number) => timeDisplay.displayMode === "frames" ? `${Math.round(seconds * timeDisplay.fps)} f` : `${seconds.toFixed(3)} s`;
-  const [document, setDocument] = useState<Document>({ tracks: [firstTrack, ...(motion ? [{ id: motion.rowId, type: "animation" as const, external: true }] : [])], clips: motion ? [{ ...motion, sourceDuration: 12 }] : [] });
+  const initialDocument = (): Document => ({ tracks: [firstTrack, ...(motion ? [{ id: motion.rowId, type: "animation" as const, external: true }] : [])], clips: motion ? [{ ...motion, sourceDuration: 12 }] : [] });
+  const [document, setDocument] = useState<Document>(initialDocument);
   const [collapsed, setCollapsed] = useState<string[]>(() => {
     try { const value = JSON.parse(localStorage.getItem("timeline-editor.demo.groups.ui.v1") ?? "[]"); return Array.isArray(value) ? value.filter(item => typeof item === "string") : []; } catch { return []; }
   });
@@ -467,11 +468,29 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
   };
   const playbackRange = document.playbackRange ?? { start: 0, end: 12 };
   const changePlaybackRange = (range: TimeRange) => { if (range.end > range.start && (range.start !== playbackRange.start || range.end !== playbackRange.end)) commit({ ...current.current, playbackRange: range }); };
+  const resetView = () => {
+    setCollapsed([]); setInspectorId(null); setEventInspectorId(null);
+    try { localStorage.removeItem("timeline-editor.demo.groups.ui.v1"); } catch { /* optional UI storage */ }
+  };
+  const resetProject = async () => {
+    if (!readyRef.current || !window.confirm("Reset this project to its initial tracks and clips? Saved audio and edits will be replaced. You can Undo until this page is closed. Display settings will be kept.")) return;
+    try {
+      await wrapped.dispatch({ type: "pause", target: null });
+      ++epoch.current; // Invalidate pending imports and stale save callbacks.
+      canPersist.current = true; // An explicit reset may replace an unreadable saved project.
+      setSelected(null); setSelectedEvent(null); setInspectorId(null); setEventInspectorId(null);
+      commit(initialDocument());
+      await wrapped.dispatch({ type: "setLooping", looping: false, target: null });
+      await wrapped.dispatch({ type: "setLoopRange", range: null, target: null });
+      await wrapped.dispatch({ type: "seek", time: 0, target: null });
+    } catch (reason) { report(reason); }
+  };
   const toolbar = <>
     <span className="example-save-state" role="status" aria-label={`${projectName}: ${saveStatus}`} title={`${projectName} · ${saveStatus}`}>{projectName}{!ready || storageError || saving ? "*" : ""}</span>
+    <button className="example-reset-project" title="Reset project to initial tracks and clips" aria-label="Reset project" disabled={!ready} onClick={() => void resetProject()}>Reset project</button>
     <button className="timeline-editor__button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.current.length} onClick={undo}><HistoryIcon action="undo" /></button>
     <button className="timeline-editor__button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!future.current.length} onClick={redo}><HistoryIcon action="redo" /></button>
   </>;
   const renameRow = (id: RowId, label: string) => commit({ ...current.current, tracks: current.current.tracks.map(track => track.id === id ? { ...track, label } : track) });
-  return { document, changePlaybackRange, collapsed, toggleRow, moveRow, reorderRow, ready, saving, toolbar, addTrack, rowIcon, rowActions, renameRow, filePicker, editing, eventEditing, properties: eventProperties ?? properties, preview, controller: wrapped, error, dismissError: () => setError("") };
+  return { document, resetView, changePlaybackRange, collapsed, toggleRow, moveRow, reorderRow, ready, saving, toolbar, addTrack, rowIcon, rowActions, renameRow, filePicker, editing, eventEditing, properties: eventProperties ?? properties, preview, controller: wrapped, error, dismissError: () => setError("") };
 }

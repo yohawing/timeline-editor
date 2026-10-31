@@ -39,5 +39,5 @@ export function usePaneResize(initialRatio = DEFAULT_RATIO, onRatioChange?: (rat
       else if (event.key === "Home") { event.preventDefault(); setRatio(DEFAULT_RATIO); }
       else if (event.key === "Escape" && drag.current) { event.preventDefault(); setRatio(drag.current.ratio); drag.current = null; }
     }} />;
-  return { shell, divider, style: { gridTemplateRows: `${preview}px minmax(0, 1fr)` } };
+  return { shell, divider, reset: () => setRatio(DEFAULT_RATIO), style: { gridTemplateRows: `${preview}px minmax(0, 1fr)` } };
 }
