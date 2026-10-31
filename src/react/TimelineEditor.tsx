@@ -1,4 +1,4 @@
-import { PlaybackRateInput } from "./PlaybackRateInput";
+import { EditableNumber } from "./EditableNumber";
 import { wheelAction, keyboardAction, keyboardPresets, normalizeKeyboardPreset, type TimelineKeyboardPreset } from "./keyboardPresets";
 export type { TimelineKeyboardPreset } from "./keyboardPresets";
 import {
@@ -649,7 +649,6 @@ export function TimelineEditor({
   const loopPointerIdRef = useRef<number | null>(null);
   const loopDragOriginRef = useRef(range.start);
   const timelineViewportRef = useRef<HTMLDivElement>(null);
-  const [editingRate, setEditingRate] = useState(false);
   const treeViewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rootRef = useRef<HTMLElement>(null);
@@ -669,10 +668,6 @@ export function TimelineEditor({
       document.removeEventListener("focusin", closeOutside);
     };
   }, []);
-  const [timeDraft, setTimeDraft] = useState<string | null>(null);
-  const timeInputRef = useRef<HTMLInputElement>(null);
-  const editingTime = timeDraft !== null;
-  useEffect(() => { if (editingTime) { timeInputRef.current?.focus(); timeInputRef.current?.select(); } }, [editingTime]);
   const rowHeightProbeRef = useRef<HTMLDivElement>(null);
   const tickWidthProbeRef = useRef<HTMLSpanElement>(null);
   const [selectedTarget, setSelectedTarget] = useState<TimelinePlaybackTarget | null>(null);
@@ -1438,40 +1433,20 @@ export function TimelineEditor({
             <button type="button" className="timeline-editor__button" disabled={duration <= 0} title={shortcutTitle("Skip to end", "end")} aria-label="Skip to end" onClick={() => seekTo(playbackRange.end)}><SkipNextIcon /></button>
             <button type="button" className={`timeline-editor__button${playbackSnapshot.looping ? " is-active" : ""}`} disabled={!canTransport} title={shortcutTitle("Toggle loop playback", "loop")} aria-label="Loop" onClick={() => dispatchTransport({ type: "setLooping", looping: !playbackSnapshot.looping })}><RepeatIcon /></button>
             <button type="button" className={`timeline-editor__button${snap ? " is-active" : ""}`} aria-label="Snap to frames" aria-pressed={snap} title={`Snap to frames: ${snap ? "On" : "Off"} · ${keyboardPreset === "unity" ? "Hold Alt after starting a drag to bypass; Alt+drag pans" : "Alt-drag to bypass"}`} onClick={() => setSnap(!snap)}><SnapIcon /></button>
-            {editingRate ? <PlaybackRateInput rate={playbackRate} label="Playback rate" disabled={!canTransport} autoFocus onCommit={rate => dispatchTransport({ type: "setRate", rate })} onFinish={() => setEditingRate(false)} /> : <button
-              type="button"
+            <EditableNumber value={playbackRate} display={formatTimelineRate(playbackRate)}
+              label="Playback rate" title="Enter playback rate" disabled={!canTransport}
               className={`timeline-editor__button timeline-editor__button--rate${playbackRate !== 1 ? " is-active" : ""}`}
-              disabled={!canTransport}
-              title="Enter playback rate" aria-label="Playback rate"
-              onClick={() => setEditingRate(true)}
-            >
-              {formatTimelineRate(playbackRate)}
-            </button>}
+              inputClassName="timeline-editor__rate-input" isValid={rate => rate > 0}
+              onCommit={rate => dispatchTransport({ type: "setRate", rate })} />
           </div>
-          {timeDraft === null ? (
-            <button ref={readoutRef} type="button" className="timeline-editor__readout"
-              disabled={Boolean(playbackController && !playbackSnapshot.available)}
-              onClick={() => setTimeDraft(String(displayMode === "frames" ? Math.round(currentReadoutTime() * fps) : currentReadoutTime()))}
-              onKeyDown={event => { if (event.key === "Enter" || event.key === "F2") { event.preventDefault(); setTimeDraft(String(displayMode === "frames" ? Math.round(currentReadoutTime() * fps) : currentReadoutTime())); } }}
-              title="Click to enter current time" aria-label="Current time">{playbackReadout}</button>
-          ) : (
-            <input ref={timeInputRef} className="timeline-editor__readout timeline-editor__time-input" type="number"
-              aria-label={displayMode === "frames" ? "Current frame" : "Current seconds"}
-              step={displayMode === "frames" ? 1 : 1 / fps} value={timeDraft}
-              onChange={event => setTimeDraft(event.target.value)} onBlur={() => setTimeDraft(null)}
-              onKeyDown={event => {
-                event.stopPropagation();
-                if (event.key === "Escape") { event.preventDefault(); setTimeDraft(null); }
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  const value = Number(timeDraft);
-                  if (timeDraft.trim() !== "" && Number.isFinite(value)) {
-                    seekTo(displayMode === "frames" ? value / fps : value);
-                    setTimeDraft(null);
-                  }
-                }
-              }} />
-          )}
+          <EditableNumber buttonRef={readoutRef} value={displayMode === "frames" ? Math.round(time * fps) : time}
+            getValue={() => displayMode === "frames" ? Math.round(currentReadoutTime() * fps) : currentReadoutTime()}
+            display={playbackReadout} label="Current time" inputLabel={displayMode === "frames" ? "Current frame" : "Current seconds"}
+            title="Click to enter current time" className="timeline-editor__readout"
+            inputClassName="timeline-editor__readout timeline-editor__time-input"
+            disabled={Boolean(playbackController && !playbackSnapshot.available)}
+            step={displayMode === "frames" ? 1 : 1 / fps} commitOnBlur={false}
+            onCommit={value => seekTo(displayMode === "frames" ? value / fps : value)} />
           <div className="timeline-editor__slot timeline-editor__slot--end">
           <details ref={settingsRef} className="timeline-editor__settings" onKeyDown={event => {
             event.stopPropagation();
@@ -1548,7 +1523,7 @@ export function TimelineEditor({
                 </label>;
               })}
               <label>Speed
-                <PlaybackRateInput rate={playbackRate} label="Playback speed" disabled={!canTransport} onCommit={rate => dispatchTransport({ type: "setRate", rate })} />
+                <EditableNumber value={playbackRate} label="Playback speed" inputClassName="timeline-editor__rate-input" disabled={!canTransport} isValid={rate => rate > 0} onCommit={rate => dispatchTransport({ type: "setRate", rate })} />
               </label>
               {slots?.settings}
             </div>
