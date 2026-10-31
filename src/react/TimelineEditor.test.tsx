@@ -501,6 +501,21 @@ it('opts into item commits and cancels an edit on Escape', () => {
   expect(onCommit).toHaveBeenCalledOnce();
 });
 
+it("commits the last item preview when Alt is released before the pointer", () => {
+  const data = source();
+  const item = { kind: "clip" as const, id: timelineId<"clip">("snap-clip"), rowId, label: "Edit", color: "#fff", range: { start: 1, end: 3 } };
+  data.getItems = () => [item];
+  const onCommit = vi.fn();
+  render(<TimelineEditor dataSource={data} editing={{ onCommit }} frameRate={30} initialViewState={{ pixelsPerSecond: 100 }} />);
+  const viewport = screen.getByRole("application", { name: "Timeline scrubber" });
+  for (const [type, clientX, altKey] of [["pointerdown", 150, false], ["pointermove", 154.3, true], ["pointerup", 154.3, false]] as const) {
+    const event = new Event(type, { bubbles: true });
+    Object.assign(event, { button: 0, pointerId: 1, clientX, clientY: 10, altKey });
+    fireEvent(viewport, event);
+  }
+  expect(onCommit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ next: expect.objectContaining({ range: { start: expect.closeTo(1.043, 8), end: expect.closeTo(3.043, 8) } }) }));
+});
+
 
 it('owns optional sidebar content and restores the layout when omitted', () => {
   const data = source();
@@ -612,3 +627,15 @@ it("opens the host sidebar on item double-click and leaves its shortcuts host-ow
    fireEvent.change(input, { target: { value: "100" } }); fireEvent.keyDown(input, { key: "Enter" });
    expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 10, target });
  });
+
+ it.each([[true, false, 1 / 30], [false, false, 0.043], [true, true, 0.043]])(
+   "applies snap=%s and Alt=%s to live scrub commands", (snap, altKey, expected) => {
+     const playback = controller();
+     render(<TimelineEditor dataSource={source()} playbackController={playback} frameRate={30} initialViewState={{ snap, pixelsPerSecond: 100 }} />);
+     const viewport = screen.getByRole("application", { name: "Timeline scrubber" });
+     const event = new Event("pointerdown", { bubbles: true });
+     Object.assign(event, { button: 0, pointerId: 1, clientX: 4.3, altKey });
+     fireEvent(viewport, event);
+     expect(playback.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "seek", time: expect.closeTo(expected, 8) }));
+   }
+ );

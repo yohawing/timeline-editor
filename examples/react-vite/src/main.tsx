@@ -99,7 +99,7 @@ function Example(): JSX.Element {
           frameRateValue={String(fps)}
           onFrameRateChange={value => setFps(Number(value))}
           variant={variant}
-          slots={{ toolbarEnd: <select aria-label="Theme" title="Theme" value={theme} onChange={event => setTheme(event.target.value as "dark" | "light")}><option value="dark">Dark</option><option value="light">Light</option></select>, inspector: audio.properties, toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack, rowActions: audio.rowActions, rowIcon: audio.rowIcon }}
+          slots={{ settings: <label>Theme<select aria-label="Theme" title="Theme" value={theme} onChange={event => setTheme(event.target.value as "dark" | "light")}><option value="dark">Dark</option><option value="light">Light</option></select></label>, inspector: audio.properties, toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack, rowActions: audio.rowActions, rowIcon: audio.rowIcon }}
           onDiagnostic={(diagnostic) => console.warn(diagnostic.message, diagnostic.error)}
           onPerformanceSummary={(summary) => {
             const runtime = globalThis as { __timelinePerf?: unknown; __timelinePerfSamples?: unknown[] };

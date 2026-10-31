@@ -118,7 +118,7 @@ test("stress mode queries only a bounded virtualized page", async ({ page }) => 
  * The header's title tab moved inline into the single-row toolbar (it used
  * to stack in its own 20px row above a 24px toolbar row, making the whole
  * control bar an unnaturally tall 44px) so `.timeline-editor__tabs` is now
- * the same 24px height as the toolbar it sits inside, and the header is a
+ * the same 36px height as the toolbar it sits inside, and the header is a
  * single natural row.
  */
 test("keeps a compact header and readable waveform rows at the default root size", async ({ page }) => {
@@ -128,10 +128,10 @@ test("keeps a compact header and readable waveform rows at the default root size
       (element, cssProp) => Number.parseFloat(getComputedStyle(element)[cssProp as never] as string),
       prop,
     );
-  await expect.poll(() => px(".timeline-editor__header", "height")).toBe(24);
+  await expect.poll(() => px(".timeline-editor__header", "height")).toBe(36);
   await expect(page.locator(".timeline-editor__tabs")).toHaveCount(0);
-  await expect.poll(() => px(".timeline-editor__toolbar", "height")).toBe(24);
-  await expect.poll(() => px(".timeline-editor__transport .timeline-editor__button", "width")).toBe(22);
+  await expect.poll(() => px(".timeline-editor__toolbar", "height")).toBe(36);
+  await expect.poll(() => px(".timeline-editor__transport .timeline-editor__button", "width")).toBe(28);
   await expect.poll(() => px(".timeline-editor__row", "height")).toBe(44);
   await expect(page.locator(".timeline-editor__row-disclosure")).toHaveCount(0);
   await expect.poll(() => px(".timeline-editor__tree-viewport", "width")).toBe(212);

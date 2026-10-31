@@ -1,5 +1,34 @@
 import { test, expect } from "@playwright/test";
 
+test("Snap controls live host seeking and settings use the same compact scrollbars", async ({ page }) => {
+  await page.goto("/?fps=2");
+  const snap = page.getByRole("button", { name: "Snap to frames" });
+  const ruler = page.locator(".timeline-editor__ruler");
+  const point = await ruler.evaluate(element => {
+    const viewport = document.querySelector<HTMLElement>(".timeline-editor__viewport")!;
+    const content = document.querySelector<HTMLElement>(".timeline-editor__content")!;
+    const editor = document.querySelector<HTMLElement>(".timeline-editor")!;
+    const start = Number(editor.dataset.viewStart), end = Number(editor.dataset.viewEnd);
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + (1.23 - start) / (end - start) * content.getBoundingClientRect().width - viewport.scrollLeft, y: rect.y + 4 };
+  });
+  await page.mouse.click(point.x, point.y);
+  await expect(page.getByLabel("Animation preview")).toHaveAttribute("data-time", "1.000");
+  await snap.click();
+  await expect(snap).toHaveAttribute("aria-pressed", "false");
+  await page.mouse.click(point.x, point.y);
+  await expect.poll(async () => Number(await page.getByLabel("Animation preview").getAttribute("data-time"))).toBeCloseTo(1.23, 1);
+  await snap.click();
+  await page.keyboard.down("Alt"); await page.mouse.click(point.x, point.y); await page.keyboard.up("Alt");
+  await expect.poll(async () => Number(await page.getByLabel("Animation preview").getAttribute("data-time"))).toBeCloseTo(1.23, 1);
+  await page.getByLabel("Timeline settings").click();
+  for (const selector of [".timeline-editor__viewport", ".timeline-editor__settings-panel"]) {
+    expect(await page.locator(selector).evaluate(el => getComputedStyle(el, "::-webkit-scrollbar").width)).toBe("6px");
+  }
+  await page.getByLabel("Theme", { exact: true }).selectOption("light");
+  await expect(page.getByRole("region", { name: "Timeline editor" })).toHaveAttribute("data-theme", "light");
+});
+
 test("settings keyboard interaction stays isolated and the panel fits a short editor", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 750 });
   await page.goto("/");

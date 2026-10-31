@@ -8,10 +8,10 @@ export interface TimelineItemEdit {
 }
 
 /** Propose a bounded edit without mutating the data source. */
-export function proposeTimelineItemEdit(item: TimelineItem, mode: TimelineEditMode, delta: number, bounds: TimeRange, fps: number): TimelineItemEdit {
+export function proposeTimelineItemEdit(item: TimelineItem, mode: TimelineEditMode, delta: number, bounds: TimeRange, fps: number, snap = true): TimelineItemEdit {
   if (!Number.isFinite(delta) || !Number.isFinite(fps) || fps <= 0 ||
     !Number.isFinite(bounds.start) || !Number.isFinite(bounds.end) || bounds.end <= bounds.start) throw new RangeError("Invalid edit bounds or delta");
-  const snapped = Math.round(delta * fps) / fps;
+  const snapped = snap ? Math.round(delta * fps) / fps : delta;
   const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
   if (item.kind !== "clip") {
     if (!Number.isFinite(item.time)) throw new RangeError("Invalid item time");

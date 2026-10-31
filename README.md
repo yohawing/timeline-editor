@@ -308,6 +308,10 @@ Hosts can set `allowViewOutsideRange={false}` to bound time-axis zoom and pan to
 
 Open the gear button for frame/second display, FPS, playback start/end, and playback speed. FPS choices and range edits use the existing host callbacks (`onFrameRateChange`, `onChangePlaybackRange`); unavailable controls stay disabled. Range input commits with Enter, snaps to a frame, and preserves at least one frame between start and end.
 
+`slots.settings` accepts host-owned settings content; the demo places Dark/Light selection here. The toolbar defaults to 36px with 28px controls, and scrollable panels share compact scrollbars. Settings and Snap use Google Material Symbols, consistent with the transport controls.
+
+The Snap icon highlights when enabled. It controls pointer scrubbing, clip/event edits, playback-range handles and loop-range dragging; Alt temporarily bypasses snapping. Explicit frame-step and numeric-navigation commands retain frame snapping. `proposeTimelineItemEdit` also accepts an optional final `snap` argument (default `true`).
+
 Double-click the current-time readout (or focus it and press Enter/F2) to enter a frame number or seconds in the selected display mode. Enter seeks through the existing playback controller, with frame snapping and playback-range clamping. Escape or leaving the field cancels the edit. A controller-free timeline updates its local playhead.
 
 ### Keyboard presets

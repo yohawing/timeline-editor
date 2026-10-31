@@ -82,6 +82,8 @@ import {
   PauseIcon,
   PlayIcon,
   RepeatIcon,
+  SettingsIcon,
+  SnapIcon,
   SkipNextIcon,
   SkipPreviousIcon,
 } from "./icons";
@@ -112,6 +114,8 @@ export interface TimelineEditorSlots {
   rowIcon?: (row: TimelineRow) => ReactNode;
   toolbarStart?: ReactNode;
   toolbarEnd?: ReactNode;
+  /** Host-owned settings (for example theme selection) inside the settings panel. */
+  settings?: ReactNode;
   emptyState?: ReactNode;
   diagnosticAction?: ReactNode;
 }
@@ -538,7 +542,7 @@ export function TimelineEditor({
     const available = element.closest(".timeline-editor")!.getBoundingClientRect().width;
     setSidebarWidth(Math.max(Math.min(180, available), Math.min(available, width)));
   };
-  const editDrag = useRef<{ pointer: number; x: number; item: TimelineItem; mode: TimelineEditMode; revision: number; source: TimelineDataSource } | null>(null);
+  const editDrag = useRef<{ pointer: number; x: number; item: TimelineItem; mode: TimelineEditMode; revision: number; source: TimelineDataSource; preview?: TimelineItemEdit } | null>(null);
   const [editPreview, setEditPreview] = useState<TimelineItemEdit | null>(null);
   const fps = normalizeFrameRate(frameRate);
   const revision = useSyncExternalStore(
@@ -817,13 +821,13 @@ export function TimelineEditor({
     return () => cancelAnimationFrame(frame);
   }, [playbackController, playbackSnapshot, updatePlayhead]);
 
-  const seekFromClientX = useCallback((clientX: number) => {
+  const seekFromClientX = useCallback((clientX: number, bypass = false) => {
     const element = timelineViewportRef.current;
     if (!element) return;
     const next = resolveTimelineSeekTime(
       range.start + (clientX - element.getBoundingClientRect().left + element.scrollLeft) / pixelsPerSecond,
       playbackRange,
-      "frame-snap",
+      snap && !bypass ? "frame-snap" : "unsnapped",
       fps,
     );
     scrubPreviewRef.current = next;
@@ -835,7 +839,7 @@ export function TimelineEditor({
     if (playbackController && playbackSnapshot.available) {
       dispatchSafely(playbackController, { type: "seek", time: next, target: commandTarget }, onDiagnostic);
     }
-  }, [commandTarget, fps, onDiagnostic, pixelsPerSecond, playbackController, playbackSnapshot.available, range.start, playbackRange, updatePlayhead]);
+  }, [commandTarget, snap, fps, onDiagnostic, pixelsPerSecond, playbackController, playbackSnapshot.available, range.start, playbackRange, updatePlayhead]);
 
   const hitItem = useCallback((clientX: number, clientY: number) => {
     const element = timelineViewportRef.current;
@@ -881,20 +885,23 @@ export function TimelineEditor({
     if (scrubWasPlayingRef.current && playbackController) {
       dispatchSafely(playbackController, { type: "pause", target: commandTarget }, onDiagnostic);
     }
-    seekFromClientX(event.clientX);
+    seekFromClientX(event.clientX, event.altKey);
   }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, playbackSnapshot.playing, seekFromClientX, time, itemEditing, hitItem, dataSource, pixelsPerSecond, range.start, revision]);
 
   const onPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = editDrag.current;
     if (drag && drag.pointer === event.pointerId) {
-      try { setEditPreview(proposeTimelineItemEdit(drag.item, drag.mode, (event.clientX - drag.x) / pixelsPerSecond, range, fps)); }
+      try {
+        drag.preview = proposeTimelineItemEdit(drag.item, drag.mode, (event.clientX - drag.x) / pixelsPerSecond, range, fps, snap && !event.altKey);
+        setEditPreview(drag.preview);
+      }
       catch (error) { onDiagnostic?.({ level: "error", source: "timeline", message: "Cannot edit item", error }); }
       return;
     }
 
     if (pointerIdRef.current !== event.pointerId) return;
-    seekFromClientX(event.clientX);
-  }, [seekFromClientX, pixelsPerSecond, range, fps, onDiagnostic]);
+    seekFromClientX(event.clientX, event.altKey);
+  }, [seekFromClientX, pixelsPerSecond, range, fps, snap, onDiagnostic]);
 
   const finishScrub = useCallback((event: ReactPointerEvent<HTMLDivElement>, cancelled: boolean) => {
     const drag = editDrag.current;
@@ -903,7 +910,8 @@ export function TimelineEditor({
       setEditPreview(null);
       if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
       if (!cancelled && itemEditing && dataSource === drag.source && revision === drag.revision && Math.abs(event.clientX - drag.x) > 2) {
-        try { itemEditing.onCommit(proposeTimelineItemEdit(drag.item, drag.mode, (event.clientX - drag.x) / pixelsPerSecond, range, fps)); }
+        // Commit what the user last saw, even if Alt changes before pointerup.
+        try { itemEditing.onCommit(drag.preview ?? proposeTimelineItemEdit(drag.item, drag.mode, (event.clientX - drag.x) / pixelsPerSecond, range, fps, snap && !event.altKey)); }
         catch (error) { onDiagnostic?.({ level: "error", source: "timeline", message: "Item edit rejected", error }); }
       }
       return;
@@ -928,7 +936,7 @@ export function TimelineEditor({
     pointerIdRef.current = null;
     setScrubbing(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, updatePlayhead, itemEditing, dataSource, revision, pixelsPerSecond, range, fps]);
+  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, updatePlayhead, itemEditing, dataSource, revision, pixelsPerSecond, range, fps, snap]);
 
   /** Seek transport (skip-to-start/end, frame step) shares scrub's dispatch-or-local-set split. */
   const seekTo = useCallback((nextTime: number) => {
@@ -989,22 +997,22 @@ export function TimelineEditor({
     }
   }, [commandTarget, playbackRange, onDiagnostic, playbackController, playbackSnapshot.available]);
 
-  const loopTimeFromClientX = useCallback((clientX: number) => {
+  const loopTimeFromClientX = useCallback((clientX: number, bypass = false) => {
     const element = timelineViewportRef.current;
     if (!element) return playbackRange.start;
     return resolveTimelineSeekTime(
       range.start + (clientX - element.getBoundingClientRect().left + element.scrollLeft) / pixelsPerSecond,
       playbackRange,
-      "frame-snap",
+      snap && !bypass ? "frame-snap" : "unsnapped",
       fps,
     );
-  }, [fps, pixelsPerSecond, range.start, playbackRange]);
+  }, [snap, fps, pixelsPerSecond, range.start, playbackRange]);
 
   const onLoopLanePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     event.stopPropagation();
     loopPointerIdRef.current = event.pointerId;
-    const origin = loopTimeFromClientX(event.clientX);
+    const origin = loopTimeFromClientX(event.clientX, event.altKey);
     loopDragOriginRef.current = origin;
     event.currentTarget.setPointerCapture(event.pointerId);
     setLoopDragPreview({ start: origin, end: origin });
@@ -1012,7 +1020,7 @@ export function TimelineEditor({
 
   const onLoopLanePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (loopPointerIdRef.current !== event.pointerId) return;
-    const current = loopTimeFromClientX(event.clientX);
+    const current = loopTimeFromClientX(event.clientX, event.altKey);
     const origin = loopDragOriginRef.current;
     setLoopDragPreview({ start: Math.min(origin, current), end: Math.max(origin, current) });
   }, [loopTimeFromClientX]);
@@ -1398,7 +1406,7 @@ export function TimelineEditor({
             event.stopPropagation();
             if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); }
           }}>
-            <summary className="timeline-editor__button" aria-label="Timeline settings" title="Timeline settings">⚙</summary>
+            <summary className="timeline-editor__button" aria-label="Timeline settings" title="Timeline settings"><SettingsIcon /></summary>
             <div className="timeline-editor__settings-panel" style={{ maxHeight: viewport.height }}>
               <span className="timeline-editor__settings-heading">Controls</span>
               <label>Keyboard preset
@@ -1410,7 +1418,8 @@ export function TimelineEditor({
                 {keyboardPresets[keyboardPreset].keys.previous ? `Frame: ${keyboardPresets[keyboardPreset].keys.previous} / ${keyboardPresets[keyboardPreset].keys.next}` : "Enter: Stop / return · C: Loop"}
               </small>
               <span className="timeline-editor__settings-heading">Display</span>
-              <button type="button" className="timeline-editor__button timeline-editor__button--text" onClick={() => setDisplayMode(mode => mode === "frames" ? "seconds" : "frames")} aria-label="Toggle time display" title="Switch frames / seconds">{displayMode === "frames" ? "Frames" : "Seconds"} ⇄</button>
+              <div className="timeline-editor__setting-row"><span>Time display</span><button type="button" className="timeline-editor__button timeline-editor__button--text" onClick={() => setDisplayMode(mode => mode === "frames" ? "seconds" : "frames")} aria-label="Toggle time display" title="Switch frames / seconds">{displayMode === "frames" ? "Frames" : "Seconds"} ⇄</button></div>
+              <label>Frame rate
           {frameRateOptions ? (
             <select
               className="timeline-editor__fps timeline-editor__fps-select"
@@ -1423,6 +1432,7 @@ export function TimelineEditor({
           ) : (
             <span className="timeline-editor__fps">{fps} fps</span>
           )}
+              </label>
               <span className="timeline-editor__settings-heading">Playback</span>
               {(["start", "end"] as const).map(edge => {
                 const displayed = displayMode === "frames" ? Math.round(playbackRange[edge] * fps) : playbackRange[edge];
@@ -1456,9 +1466,10 @@ export function TimelineEditor({
                   {Array.from(new Set<number>([...TIMELINE_RATE_STEPS, playbackRate])).sort((a, b) => a - b).map(rate => <option key={rate} value={rate}>{formatTimelineRate(rate)}</option>)}
                 </select>
               </label>
+              {slots?.settings}
             </div>
           </details>
-          {editing && <button type="button" className="timeline-editor__button timeline-editor__button--text" aria-label="Snap to frames" aria-pressed={snap} title="Snap to frames · Alt-drag to bypass" onClick={() => setSnap(!snap)}>Snap</button>}
+          <button type="button" className={`timeline-editor__button${snap ? " is-active" : ""}`} aria-label="Snap to frames" aria-pressed={snap} title={`Snap to frames: ${snap ? "On" : "Off"} · Alt-drag to bypass`} onClick={() => setSnap(!snap)}><SnapIcon /></button>
           <div className="timeline-editor__slot timeline-editor__slot--end">{slots?.toolbarEnd}
             {sidebar && <button type="button" className="timeline-editor__button timeline-editor__sidebar-toggle" aria-label={`Toggle ${sidebar.title}`} title={`Toggle ${sidebar.title}`} aria-controls={sidebarId} aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(open => !open)}>{sidebar.title}</button>}
           </div>
@@ -1494,7 +1505,7 @@ export function TimelineEditor({
             onPointerUp={(event) => finishScrub(event, false)}
             onPointerCancel={(event) => finishScrub(event, true)}
           >
-            {canTransport && onChangePlaybackRange && <PlaybackRangeHandles range={playbackRangePreview ?? playbackRange} viewStart={range.start} scale={pixelsPerSecond} scrollLeft={scroll.left} width={viewport.width} fps={fps} displayMode={displayMode} onPreview={setPlaybackRangePreview} onChange={onChangePlaybackRange} />}
+            {canTransport && onChangePlaybackRange && <PlaybackRangeHandles snap={snap} range={playbackRangePreview ?? playbackRange} viewStart={range.start} scale={pixelsPerSecond} scrollLeft={scroll.left} width={viewport.width} fps={fps} displayMode={displayMode} onPreview={setPlaybackRangePreview} onChange={onChangePlaybackRange} />}
             <span ref={tickWidthProbeRef} className="timeline-editor__tick timeline-editor__tick--measure" aria-hidden="true">00000000</span>
             {ticks.map((tick) => <span className="timeline-editor__tick" key={tick} style={{ left: `${Math.max(tickLabelWidth / 2, Math.min(viewport.width - tickLabelWidth / 2, ((tick - range.start) * pixelsPerSecond) - scroll.left))}px` }}>{formatTimelineTick(tick, displayMode, fps)}</span>)}
             <div

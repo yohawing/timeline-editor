@@ -33,3 +33,9 @@ it("keeps point edits inside half-open bounds and rejects malformed item times",
   expect(() => proposeTimelineItemEdit({ ...clip, range: { start: NaN, end: 4 } }, "move", 1, bounds, 30)).toThrow(RangeError);
   expect(() => proposeTimelineItemEdit({ ...clip, range: { start: 2, end: Infinity } }, "resize-end", 1, bounds, 30)).toThrow(RangeError);
 });
+
+it("keeps subframe deltas with snapping disabled while retaining resize bounds", () => {
+  expect(proposeTimelineItemEdit(clip, "move", 0.043, bounds, 30, false).next).toMatchObject({ range: { start: 2.043, end: 4.043 } });
+  expect(proposeTimelineItemEdit(clip, "resize-start", 0.043, bounds, 30, false).next).toMatchObject({ range: { start: 2.043, end: 4 } });
+  expect(proposeTimelineItemEdit(clip, "resize-end", -100, bounds, 30, false).next).toMatchObject({ range: { start: 2, end: 2 + 1 / 30 } });
+});

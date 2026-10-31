@@ -1,8 +1,8 @@
 import { useRef } from "react";
 import type { TimeRange } from "../core/contracts";
 
-export function PlaybackRangeHandles({ range, viewStart, scale, scrollLeft, width, fps, displayMode, onPreview, onChange }: {
-  range: TimeRange; viewStart: number; scale: number; scrollLeft: number; width: number; fps: number;
+export function PlaybackRangeHandles({ range, viewStart, scale, scrollLeft, width, fps, snap = true, displayMode, onPreview, onChange }: {
+  range: TimeRange; viewStart: number; scale: number; scrollLeft: number; width: number; fps: number; snap?: boolean;
   displayMode: "frames" | "seconds"; onPreview(range: TimeRange | null): void; onChange(range: TimeRange): void;
 }) {
   const drag = useRef<{ pointer: number; x: number; edge: "start" | "end"; origin: TimeRange; next: TimeRange; element: HTMLDivElement } | null>(null);
@@ -37,7 +37,7 @@ export function PlaybackRangeHandles({ range, viewStart, scale, scrollLeft, widt
         if (!start || start.pointer !== event.pointerId) return;
         event.stopPropagation();
         const raw = start.origin[edge] + (event.clientX - start.x) / scale;
-        start.next = change(start.origin, edge, event.altKey ? raw : Math.round(raw * fps) / fps);
+        start.next = change(start.origin, edge, snap && !event.altKey ? Math.round(raw * fps) / fps : raw);
         onPreview(start.next);
       }}
       onPointerUp={event => { if (drag.current?.pointer === event.pointerId) { event.stopPropagation(); finish(false); } }}
