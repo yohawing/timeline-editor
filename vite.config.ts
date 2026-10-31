@@ -8,6 +8,7 @@ export default defineConfig({
       entry: {
         index: "src/index.ts",
         core: "src/core/index.ts",
+        audio: "src/audio/index.ts",
       },
       formats: ["es"],
       cssFileName: "timeline",

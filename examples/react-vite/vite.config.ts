@@ -10,6 +10,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: [
+      { find: "@yohawing/timeline-editor/audio", replacement: `${packageRoot}/dist/audio.js` },
       { find: "@yohawing/timeline-editor/styles.css", replacement: `${packageRoot}/dist/timeline.css` },
       { find: "@yohawing/timeline-editor/core", replacement: `${packageRoot}/dist/core.js` },
       { find: "@yohawing/timeline-editor", replacement: `${packageRoot}/dist/index.js` },

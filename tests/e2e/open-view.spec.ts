@@ -1,0 +1,50 @@
+import { test, expect } from "@playwright/test";
+
+test("zoom out exposes both sides without editing playback, and fit restores the data", async ({ page }) => {
+  await page.goto("/");
+  const editor = page.getByRole("region", { name: "Timeline editor" });
+  await expect(page.getByRole("spinbutton", { name: /Playback/ })).toHaveCount(0);
+  const ruler = (await page.locator(".timeline-editor__ruler").boundingBox())!;
+  await page.mouse.move(ruler.x + ruler.width / 2, ruler.y + 5);
+  await page.mouse.wheel(0, 500);
+  await expect.poll(async () => Number(await editor.getAttribute("data-view-start"))).toBeLessThan(0);
+  await expect.poll(async () => Number(await editor.getAttribute("data-view-end"))).toBeGreaterThan(12);
+  await expect(page.getByRole("slider", { name: "Playback range start", exact: true })).toHaveAttribute("aria-valuenow", "0");
+  await expect(page.getByRole("slider", { name: "Playback range end", exact: true })).toHaveAttribute("aria-valuenow", "12");
+  await expect(page.locator(".timeline-editor__tick").filter({ hasText: /^-/ }).first()).toBeVisible();
+  const clip = page.getByRole("button", { name: "Clip Animation", exact: true });
+  await expect(clip).toHaveAttribute("data-start", "0");
+  const box = (await clip.boundingBox())!;
+  expect(box.x).toBeGreaterThan(ruler.x + 20);
+  await page.screenshot({ path: test.info().outputPath("outside-range.png") });
+  const savedStart = await editor.getAttribute("data-view-start");
+  const savedEnd = await editor.getAttribute("data-view-end");
+  await page.reload();
+  await expect(editor).toHaveAttribute("data-view-start", savedStart!);
+  await expect(editor).toHaveAttribute("data-view-end", savedEnd!);
+  await page.locator(".timeline-editor__range-bar").dblclick();
+  await expect(editor).toHaveAttribute("data-view-start", "0");
+  await expect.poll(async () => Number(await editor.getAttribute("data-view-end"))).toBeCloseTo(12, 8);
+});
+
+test("a full bar dragged right reveals earlier time; handles can extend either end", async ({ page }) => {
+  await page.goto("/");
+  const editor = page.getByRole("region", { name: "Timeline editor" });
+  const bar = page.locator(".timeline-editor__range-bar");
+  const box = (await bar.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.7, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(async () => Number(await editor.getAttribute("data-view-start"))).toBeCloseTo(-2.4, 1);
+  await bar.dblclick();
+  const left = (await page.locator(".timeline-editor__range-handle--start").boundingBox())!;
+  await page.mouse.move(left.x + left.width / 2, left.y + left.height / 2); await page.mouse.down();
+  await page.mouse.move(left.x + left.width / 2 - 60, left.y + left.height / 2, { steps: 8 }); await page.mouse.up();
+  await expect.poll(async () => Number(await editor.getAttribute("data-view-start"))).toBeLessThan(0);
+  await expect.poll(async () => Number(await editor.getAttribute("data-view-end"))).toBeCloseTo(12, 8);
+  const right = (await page.locator(".timeline-editor__range-handle--end").boundingBox())!;
+  await page.mouse.move(right.x + right.width / 2, right.y + right.height / 2); await page.mouse.down();
+  await page.mouse.move(right.x + right.width / 2 + 60, right.y + right.height / 2, { steps: 8 }); await page.mouse.up();
+  await expect.poll(async () => Number(await editor.getAttribute("data-view-end"))).toBeGreaterThan(12);
+});

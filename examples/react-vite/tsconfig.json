@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@yohawing/timeline-editor": ["../../src/index.ts"],
+      "@yohawing/timeline-editor/core": ["../../src/core/index.ts"],
+      "@yohawing/timeline-editor/audio": ["../../src/audio/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

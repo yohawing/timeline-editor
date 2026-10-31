@@ -13,10 +13,12 @@ test("renders full timeline and transport target selection", async ({ page }) =>
 test("supports compact variant, FPS formatting and display switch", async ({ page }) => {
   await page.goto("/?variant=compact&fps=30");
   await expect(page.locator(".timeline-editor--compact")).toBeVisible();
-  await expect(page.locator(".timeline-editor__fps")).toContainText("30 fps");
-  const readout = page.getByRole("button", { name: "Toggle time display" });
+  await expect(page.getByLabel("Frame rate")).toHaveValue("30");
+  const readout = page.getByRole("button", { name: "Current time" });
   await expect(readout).toContainText("f");
-  await readout.click();
+  await page.getByLabel("Timeline settings").click();
+  await page.getByLabel("Time display", { exact: true }).selectOption((await page.getByLabel("Time display", { exact: true }).inputValue()) === "frames" ? "seconds" : "frames");
+  await page.getByLabel("Timeline settings").click();
   await expect(readout).toContainText("s");
 });
 
@@ -27,7 +29,7 @@ test("updates Canvas layout when zoom changes", async ({ page }) => {
   const before = await content.evaluate((element) => element.getBoundingClientRect().width);
   const bounds = (await ruler.boundingBox())!;
   await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 4);
-  await page.mouse.wheel(0, 500);
+  await page.mouse.wheel(0, -500);
   await expect.poll(() => content.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(before);
 });
 
@@ -54,7 +56,7 @@ test("repaints for ResizeObserver and device-pixel-ratio changes", async ({ page
 test("scrub pointer capture and cancel restore the origin", async ({ page }) => {
   await page.goto("/");
   const viewport = page.locator(".timeline-editor__viewport");
-  const readout = page.getByRole("button", { name: "Toggle time display" });
+  const readout = page.getByRole("button", { name: "Current time" });
   const before = await readout.textContent();
   const box = await viewport.boundingBox();
   expect(box).not.toBeNull();
@@ -78,7 +80,7 @@ test("disables transport and keeps finite layout for malformed host playback", a
 test("toggles a single play/pause button and steps frames and range bounds", async ({ page }) => {
   await page.goto("/?fps=24");
   const toggle = page.getByRole("button", { name: "Play", exact: true });
-  const readout = page.getByRole("button", { name: "Toggle time display" });
+  const readout = page.getByRole("button", { name: "Current time" });
   await expect(readout).toContainText("0000");
   await page.getByRole("button", { name: "Next frame" }).click();
   await expect(readout).toContainText("0001");
@@ -116,24 +118,24 @@ test("stress mode queries only a bounded virtualized page", async ({ page }) => 
  * The header's title tab moved inline into the single-row toolbar (it used
  * to stack in its own 20px row above a 24px toolbar row, making the whole
  * control bar an unnaturally tall 44px) so `.timeline-editor__tabs` is now
- * the same 24px height as the toolbar it sits inside, and the header is a
+ * the same 36px height as the toolbar it sits inside, and the header is a
  * single natural row.
  */
-test("keeps default (16px root) computed sizes pixel-identical after the rem conversion", async ({ page }) => {
+test("keeps a compact header and readable waveform rows at the default root size", async ({ page }) => {
   await page.goto("/");
   const px = (selector: string, prop: string) =>
     page.locator(selector).first().evaluate(
       (element, cssProp) => Number.parseFloat(getComputedStyle(element)[cssProp as never] as string),
       prop,
     );
-  await expect.poll(() => px(".timeline-editor__header", "height")).toBe(24);
-  await expect.poll(() => px(".timeline-editor__tabs", "height")).toBe(24);
-  await expect.poll(() => px(".timeline-editor__toolbar", "height")).toBe(24);
-  await expect.poll(() => px(".timeline-editor__button", "width")).toBe(22);
-  await expect.poll(() => px(".timeline-editor__row", "height")).toBe(26);
-  await expect.poll(() => px(".timeline-editor__row-disclosure", "width")).toBe(12);
+  await expect.poll(() => px(".timeline-editor__header", "height")).toBe(36);
+  await expect(page.locator(".timeline-editor__tabs")).toHaveCount(0);
+  await expect.poll(() => px(".timeline-editor__toolbar", "height")).toBe(36);
+  await expect.poll(() => px(".timeline-editor__transport .timeline-editor__button", "width")).toBe(28);
+  await expect.poll(() => px(".timeline-editor__row", "height")).toBe(44);
+  await expect(page.locator(".timeline-editor__row-disclosure")).toHaveCount(0);
   await expect.poll(() => px(".timeline-editor__tree-viewport", "width")).toBe(212);
-  await expect.poll(() => px(".timeline-editor__row-height-probe", "height")).toBe(26);
+  await expect.poll(() => px(".timeline-editor__row-height-probe", "height")).toBe(44);
 });
 
 /**
@@ -149,8 +151,8 @@ test("keeps Canvas row painting aligned with the DOM row strip when root font-si
   await page.goto("/");
   await page.evaluate(() => { document.documentElement.style.fontSize = "24px"; }); // 1.5x scale
   const row = page.locator(".timeline-editor__row").first();
-  await expect.poll(() => row.evaluate((element) => Number.parseFloat(getComputedStyle(element).height))).toBe(39); // 26 * 1.5
+  await expect.poll(() => row.evaluate((element) => Number.parseFloat(getComputedStyle(element).height))).toBe(66); // 44 * 1.5
   await expect.poll(() =>
     page.locator(".timeline-editor__row-height-probe").evaluate((element) => element.getBoundingClientRect().height),
-  ).toBe(39);
+  ).toBe(66);
 });

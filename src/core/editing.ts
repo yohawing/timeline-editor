@@ -8,17 +8,19 @@ export interface TimelineItemEdit {
 }
 
 /** Propose a bounded edit without mutating the data source. */
-export function proposeTimelineItemEdit(item: TimelineItem, mode: TimelineEditMode, delta: number, bounds: TimeRange, fps: number): TimelineItemEdit {
+export function proposeTimelineItemEdit(item: TimelineItem, mode: TimelineEditMode, delta: number, bounds: TimeRange, fps: number, snap = true): TimelineItemEdit {
   if (!Number.isFinite(delta) || !Number.isFinite(fps) || fps <= 0 ||
-    !Number.isFinite(bounds.start) || !Number.isFinite(bounds.end) || bounds.end < bounds.start) throw new RangeError("Invalid edit bounds or delta");
-  const snapped = Math.round(delta * fps) / fps;
+    !Number.isFinite(bounds.start) || !Number.isFinite(bounds.end) || bounds.end <= bounds.start) throw new RangeError("Invalid edit bounds or delta");
+  const snapped = snap ? Math.round(delta * fps) / fps : delta;
   const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
   if (item.kind !== "clip") {
+    if (!Number.isFinite(item.time)) throw new RangeError("Invalid item time");
     if (mode !== "move") throw new RangeError("Only clips can be resized");
-    return { item, mode, next: { ...item, time: clamp(item.time + snapped, bounds.start, bounds.end) } };
+    return { item, mode, next: { ...item, time: clamp(item.time + snapped, bounds.start, Math.max(bounds.start, bounds.end - 1 / fps)) } };
   }
   const { start, end } = item.range;
   const length = end - start;
+  if (!Number.isFinite(start) || !Number.isFinite(end)) throw new RangeError("Invalid clip range");
   if (length <= 0 || length > bounds.end - bounds.start) throw new RangeError("Clip cannot fit edit bounds");
   let range: TimeRange;
   if (mode === "move") {

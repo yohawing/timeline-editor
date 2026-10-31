@@ -66,6 +66,8 @@ interface TimelineItemBase {
   rowId: RowId;
   label: string;
   selected?: boolean;
+  /** Excluded from host evaluation, but still editable. */
+  disabled?: boolean;
 }
 
 export interface TimelineClip extends TimelineItemBase {
@@ -73,8 +75,15 @@ export interface TimelineClip extends TimelineItemBase {
   id: ClipId;
   range: TimeRange;
   /** Peak amplitudes at uniform source-time intervals; independent of clip length. */
-  waveform?: { peaks: readonly number[]; sampleDuration: number };
+  waveform?: readonly number[] | { peaks: readonly number[]; sampleDuration: number };
   color: string;
+  /** Media time at the left edge; moving a clip preserves this offset. */
+  sourceOffset?: number;
+  /** Host excludes this clip from evaluation; the editor keeps it editable. */
+  disabled?: boolean;
+  /** Full source length in seconds (also the cycle length when looping). */
+  sourceDuration?: number;
+  loop?: boolean;
 }
 
 export interface TimelineCue extends TimelineItemBase {
@@ -180,6 +189,6 @@ export function normalizeTime(value: number): TimeValue {
 export function normalizeTimeRange(range: TimeRange): TimeRange {
   const start = normalizeTime(range.start);
   const end = normalizeTime(range.end);
-  if (start < 0 || end < start) throw new RangeError("Timeline range must satisfy 0 <= start <= end");
+  if (end < start) throw new RangeError("Timeline range must satisfy start <= end");
   return { start, end };
 }

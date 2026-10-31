@@ -7,6 +7,28 @@ import {
 } from "./playback";
 
 describe("transport-neutral playback controller", () => {
+  it("settles sub-tick time on pause/rate changes and resets elapsed time on seek", () => {
+    vi.useFakeTimers();
+    try {
+      const controller = createLocalPlaybackController(12);
+      const target = null;
+      controller.dispatch({ type: "play", target });
+      vi.advanceTimersByTime(50);
+      controller.dispatch({ type: "pause", target });
+      expect(controller.getSnapshot().time).toBeCloseTo(0.05);
+      controller.dispatch({ type: "play", target });
+      vi.advanceTimersByTime(50);
+      controller.dispatch({ type: "setRate", rate: 2, target });
+      expect(controller.getSnapshot().time).toBeCloseTo(0.1);
+      vi.advanceTimersByTime(50);
+      expect(controller.getSnapshot().time).toBeCloseTo(0.2);
+      vi.advanceTimersByTime(25);
+      controller.dispatch({ type: "seek", time: 5, target });
+      vi.advanceTimersByTime(75);
+      expect(controller.getSnapshot().time).toBeCloseTo(5.15);
+      controller.dispatch({ type: "pause", target });
+    } finally { vi.useRealTimers(); }
+  });
   it("supports play, pause, seek and loop without a native runtime", () => {
     const controller = createLocalPlaybackController(4, 1.02);
     const listener = vi.fn();
@@ -125,4 +147,17 @@ describe("transport-neutral playback controller", () => {
     // 5 + 2.5s = 7.5, which is 1.5s past loopEnd (6); wraps to loopStart (2) + 1.5 = 3.5.
     expect(projectTimelinePlaybackTime(snapshot, 2_500)).toBe(3.5);
   });
+});
+
+it("changes playback bounds independently and clamps seek and looping", () => {
+  const controller = createLocalPlaybackController(12);
+  controller.dispatch({ type: "setPlaybackRange", range: { start: 3, end: 8 }, target: { instanceId: "new", clipIndex: 2 } });
+  expect(controller.getSnapshot().target).toEqual({ instanceId: "new", clipIndex: 2 });
+  expect(controller.getSnapshot()).toMatchObject({ time: 3, duration: 5, range: { start: 3, end: 8 } });
+  controller.dispatch({ type: "seek", time: 20, target: null });
+  expect(controller.getSnapshot().time).toBe(8);
+  controller.dispatch({ type: "setLoopRange", range: { start: 1, end: 10 }, target: null });
+  expect(controller.getSnapshot().loopRange).toEqual({ start: 3, end: 8 });
+  expect(() => controller.dispatch({ type: "setPlaybackRange", range: { start: 8, end: 3 }, target: null })).toThrow();
+  expect(controller.getSnapshot().range).toEqual({ start: 3, end: 8 });
 });

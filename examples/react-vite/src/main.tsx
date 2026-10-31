@@ -1,14 +1,20 @@
-import { StrictMode, useMemo, useState } from "react";
+import { StrictMode, useEffect, useMemo, useState, useCallback, type JSX } from "react";
 import { createRoot } from "react-dom/client";
-import { TimelineEditor } from "@yohawing/timeline-editor";
+import { TimelineEditor, type TimelineViewState } from "@yohawing/timeline-editor";
 import {
   createFixtureTimelineDataSource,
   createLocalPlaybackController,
   createStressTimelineDataSource,
   type TimelinePlaybackController,
+  type TimelineDataSource,
+  type TimelineClip,
+  timelineId,
 } from "@yohawing/timeline-editor/core";
 import "@yohawing/timeline-editor/styles.css";
 import "./example.css";
+import { useUiPreferences } from "./uiPreferences";
+import { usePaneResize } from "./usePaneResize";
+import { useAudioDemo, withAudioRows } from "./audioDemo";
 
 function createMalformedPlaybackController(): TimelinePlaybackController {
   const snapshot = {
@@ -27,15 +33,33 @@ function createMalformedPlaybackController(): TimelinePlaybackController {
   };
 }
 
+function createPreviewTimeline(): TimelineDataSource {
+  const base = createFixtureTimelineDataSource();
+  const row = base.getRows({ start: 0, count: base.getRowCount() }).find(row => row.label === "Root Motion")!;
+  return { ...base, getRowCount: () => 1, getRows: ({ start, count }) => [{ ...row, depth: 0, groupId: undefined }].slice(start, start + count),
+    getGroups: () => [], getKeys: () => [], getKeyColumns: () => [],
+    getItems: query => query.rowIds.includes(row.id) ? [{ kind: "clip", id: timelineId<"clip">("preview-animation"), rowId: row.id, label: "Animation", range: { start: 0, end: 12 }, color: "#58658d" }] : [],
+  };
+}
+
 function Example(): JSX.Element {
+  const preferences = useUiPreferences();
+  const [viewRevision, setViewRevision] = useState(0);
+  const panes = usePaneResize(preferences.initial.previewRatio, preferences.saveRatio);
   const params = new URLSearchParams(window.location.search);
   const [theme, setTheme] = useState<"dark" | "light">(params.get("theme") === "light" ? "light" : "dark");
   const stress = params.get("stress") === "1";
   const variant = params.get("variant") === "compact" ? "compact" : "full";
-  const fps = Number(params.get("fps") ?? 24);
+  const requestedFps = Number(params.get("fps") ?? 24);
+  const [fps, setFps] = useState(Number.isFinite(requestedFps) && requestedFps > 0 ? requestedFps : 24);
+  const [displayMode, setDisplayMode] = useState<"frames" | "seconds">(preferences.initial.timeline?.displayMode === "seconds" ? "seconds" : "frames");
+  const onViewStateChange = useCallback((state: TimelineViewState) => {
+    setDisplayMode(state.displayMode);
+    preferences.saveTimeline(state);
+  }, [preferences.saveTimeline]);
   const malformed = params.get("malformed") === "1";
-  const reject = params.get("reject") === "1";
-  const dataSource = useMemo(() => stress ? createStressTimelineDataSource() : createFixtureTimelineDataSource(), [stress]);
+  const reject = params.get("reject");
+  const dataSource = useMemo(() => stress ? createStressTimelineDataSource() : createPreviewTimeline(), [stress]);
   const playbackController = useMemo(() => {
     if (malformed) return createMalformedPlaybackController();
     const local = createLocalPlaybackController(12, 0);
@@ -43,24 +67,45 @@ function Example(): JSX.Element {
     return {
       getSnapshot: local.getSnapshot,
       subscribe: local.subscribe,
-      dispatch: () => Promise.reject(new Error("example transport rejected")),
+      dispatch: () => { if (reject === "sync") throw new Error("example transport rejected synchronously"); return Promise.reject(new Error("example transport rejected")); },
     } satisfies TimelinePlaybackController;
   }, [malformed, reject]);
+  const motion = useMemo(() => stress ? null : dataSource.getItems({ rowIds: dataSource.getRows({ start: 0, count: dataSource.getRowCount() }).map(row => row.id), range: dataSource.getRange() }).find((item): item is TimelineClip => item.kind === "clip" && item.id === "preview-animation") ?? null, [dataSource, stress]);
+  const audio = useAudioDemo(playbackController, motion, { displayMode, fps });
+  useEffect(() => { if (audio.ready) document.querySelector<HTMLElement>(".timeline-editor__viewport")?.focus({ preventScroll: true }); }, [audio.ready]);
+  const audioData = useMemo(() => withAudioRows(dataSource, audio.document, audio.collapsed), [dataSource, audio.document, audio.collapsed]);
+  const resetUiSettings = () => {
+    preferences.reset(); panes.reset(); audio.resetView();
+    setTheme("dark"); setFps(24); setDisplayMode("frames");
+    setViewRevision(value => value + 1);
+  };
   return (
-    <main className="example-shell">
-      <header className="example-heading">
-        <div><strong>Timeline Editor</strong><span>standalone projection example</span></div>
-        <label>Theme <select aria-label="Theme" value={theme} onChange={event => setTheme(event.target.value as "light" | "dark")}><option value="dark">Dark</option><option value="light">Light</option></select></label>
-      </header>
-      <div className="example-editor">
+    <main data-project-state={!audio.ready ? "loading" : audio.saving ? "saving" : "ready"} ref={panes.shell} style={panes.style} className="example-shell">
+      {panes.divider}
+      <div className="example-preview" tabIndex={-1} onPointerDown={event => event.currentTarget.focus()}>
+        <canvas ref={audio.preview} aria-label="Animation preview" />
+      </div>
+      <div inert={!audio.ready} className="example-editor" onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
         <TimelineEditor
-          dataSource={dataSource}
-          playbackController={playbackController}
-          frameRate={Number.isFinite(fps) && fps > 0 ? fps : 24}
-          variant={variant}
+          key={viewRevision}
+          shortcutScope="document"
           theme={theme}
-          sidebar={{ title: "Properties", content: <label>Name<input defaultValue="Example" /></label> }}
-          slots={{ toolbarEnd: <span className="example-badge">local transport</span> }}
+          dataSource={audioData}
+          editing={audio.editing}
+          eventEditing={audio.eventEditing}
+          initialViewState={viewRevision === 0 ? preferences.initial.timeline : undefined}
+          onViewStateChange={onViewStateChange}
+          onChangePlaybackRange={audio.changePlaybackRange}
+          onRenameRow={stress ? undefined : audio.renameRow}
+          onMoveRow={stress ? undefined : audio.moveRow}
+          onReorderRow={stress ? undefined : audio.reorderRow}
+          onToggleRow={stress ? undefined : audio.toggleRow}
+          showTitle={false}
+          playbackController={audio.controller}
+          frameRate={fps}
+          onFrameRateChange={value => setFps(Number(value))}
+          variant={variant}
+          slots={{ settings: <><label>Theme<select aria-label="Theme" title="Theme" value={theme} onChange={event => setTheme(event.target.value as "dark" | "light")}><option value="dark">Dark</option><option value="light">Light</option></select></label><button className="example-reset-settings" title="Reset display and operation settings; keep project and undo history" onClick={resetUiSettings}>Reset UI settings</button></>, inspector: audio.properties, toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack, rowActions: audio.rowActions, rowIcon: audio.rowIcon }}
           onDiagnostic={(diagnostic) => console.warn(diagnostic.message, diagnostic.error)}
           onPerformanceSummary={(summary) => {
             const runtime = globalThis as { __timelinePerf?: unknown; __timelinePerfSamples?: unknown[] };
@@ -68,7 +113,9 @@ function Example(): JSX.Element {
             runtime.__timelinePerfSamples = [...(runtime.__timelinePerfSamples ?? []), summary].slice(-120);
           }}
         />
+        {audio.error && <div className="example-error" role="alert">{audio.error}<button title="Dismiss error" aria-label="Dismiss error" onClick={audio.dismissError}>×</button></div>}
       </div>
+      {audio.filePicker}
     </main>
   );
 }

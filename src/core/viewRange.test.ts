@@ -54,9 +54,9 @@ describe("zoomAroundAnchor", () => {
     expect(next.scrollLeft).toBe(0);
   });
 
-  it("wheel: positive deltaY (wheel down) zooms in, negative zooms out, lines scale up", () => {
-    expect(wheelZoomFactor(100)).toBeGreaterThan(1);
-    expect(wheelZoomFactor(-100)).toBeLessThan(1);
+  it("wheel: negative deltaY (wheel up) zooms in, positive zooms out, lines scale up", () => {
+    expect(wheelZoomFactor(-100)).toBeGreaterThan(1);
+    expect(wheelZoomFactor(100)).toBeLessThan(1);
     expect(wheelZoomFactor(3, 1)).toBeCloseTo(wheelZoomFactor(48), 9);
     expect(wheelZoomFactor(Number.NaN)).toBe(1);
   });
@@ -104,5 +104,21 @@ describe("range thumb", () => {
     const next = panViewByFraction(view, 0.25, 20, 500);
     expect(next).toEqual({ pixelsPerSecond: 100, scrollLeft: 500 });
     expect(panViewByFraction(view, 5, 20, 500).scrollLeft).toBe(1500);
+  });
+});
+
+describe("open view bounds", () => {
+  it("zooms out beyond data while retaining the pointer time", () => {
+    const view = zoomAroundAnchor({ pixelsPerSecond: 50, scrollLeft: 0 }, 0.5, 250, 10, 500, true);
+    expect(view).toEqual({ pixelsPerSecond: 25, scrollLeft: -125 });
+    expect((view.scrollLeft + 250) / view.pixelsPerSecond).toBe(5);
+  });
+  it("extends either thumb edge while anchoring the opposite time", () => {
+    const left = viewRangeFromThumb({ start: -0.5, end: 1 }, 10, 500, "end", true);
+    expect(left.scrollLeft / left.pixelsPerSecond).toBeCloseTo(-5);
+    expect((left.scrollLeft + 500) / left.pixelsPerSecond).toBeCloseTo(10);
+    const right = viewRangeFromThumb({ start: 0, end: 1.5 }, 10, 500, "start", true);
+    expect(right.scrollLeft).toBe(0);
+    expect(500 / right.pixelsPerSecond).toBeCloseTo(15);
   });
 });
