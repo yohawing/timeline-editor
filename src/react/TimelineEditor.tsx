@@ -970,7 +970,6 @@ export function TimelineEditor({
     else if (action === "end") seekTo(playbackRange.end);
     else if (action === "previous") stepFrame(-1);
     else if (action === "next") stepFrame(1);
-    else if (action === "stopOrStart") { if (!event.repeat) { if (playbackSnapshot.playing) transport("pause"); else seekTo(playbackSnapshot.looping && loopRange ? loopRange.start : playbackRange.start); } }
     else if (action === "loop") { if (!event.repeat) dispatchTransport({ type: "setLooping", looping: !playbackSnapshot.looping }); }
     else if (action === "autoScroll") { if (!event.repeat) setAutoScroll(value => !value); }
     else if (action === "zoomIn" || action === "zoomOut") {
@@ -1119,10 +1118,10 @@ export function TimelineEditor({
       const { duration: clipDuration, width } = viewRef.current;
       const base: ViewRange = pendingViewRef.current ?? { pixelsPerSecond: viewRef.current.pixelsPerSecond, scrollLeft: viewportElement.scrollLeft };
       const pps = base.pixelsPerSecond;
-      if (action === "row-zoom" || action === "both-zoom") {
+      if (action === "row-zoom") {
         event.preventDefault();
         setRowZoom((zoom) => clampRowZoom(zoom * wheelRowZoomFactor(event.deltaY, event.deltaMode)));
-        if (action === "row-zoom") return;
+        return;
       }
       if (action === "pan-y") {
         event.preventDefault();

@@ -64,7 +64,7 @@ test("drop preview and placement use zoomed and scrolled track coordinates", asy
   await page.goto("/");
   await addTrack(page, "audio");
   const ruler = (await page.locator(".timeline-editor__ruler").boundingBox())!;
-  await page.mouse.move(ruler.x + ruler.width / 2, ruler.y + 3); await page.keyboard.down("Control"); await page.mouse.wheel(0, -500); await page.keyboard.up("Control");
+  await page.mouse.move(ruler.x + ruler.width / 2, ruler.y + 3); await page.mouse.wheel(0, -500);
   await expect.poll(() => page.locator(".timeline-editor__content").evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThan(ruler.width * 1.5);
   await page.locator(".timeline-editor__viewport").evaluate(el => {
     el.scrollLeft = document.querySelector(".timeline-editor__content")!.getBoundingClientRect().width / 4;

@@ -88,15 +88,15 @@ test("keyboard presets change shortcuts and survive reload", async ({ page }) =>
   await page.reload();
   await page.getByLabel("Timeline settings").click();
   await expect(page.getByLabel("Operation preset")).toHaveValue("maya");
-  await page.getByLabel("Operation preset").selectOption("logic");
+  await page.getByLabel("Operation preset").selectOption("default");
   await page.getByLabel("Timeline settings").click();
-  await viewport.press("c");
-  await expect(page.getByRole("button", { name: "Loop", exact: true })).toHaveClass(/is-active/);
-  await viewport.press("Enter");
-  await expect(page.getByRole("button", { name: "Current time" })).toContainText("0000");
+  await page.reload();
+  await page.getByLabel("Timeline settings").click();
+  await expect(page.getByLabel("Operation preset")).toHaveValue("default");
+  await expect(page.getByLabel("Operation preset").locator("option")).toHaveText(["Default", "UE", "Unity", "Maya"]);
 });
 
-for (const preset of ["ue", "unity", "maya", "logic"] as const) test(`${preset} navigation preset applies wheel and pan gestures`, async ({ page }) => {
+for (const preset of ["default", "ue", "unity", "maya"] as const) test(`${preset} navigation preset applies wheel and pan gestures`, async ({ page }) => {
   await page.goto("/?stress=1");
   await page.getByLabel("Timeline settings").click();
   await page.getByLabel("Operation preset").selectOption(preset);
@@ -107,16 +107,9 @@ for (const preset of ["ue", "unity", "maya", "logic"] as const) test(`${preset} 
   const before = await width();
   const box = (await viewport.boundingBox())!;
   await page.mouse.move(box.x + 200, box.y + 80);
-  if (preset === "logic") {
-    await page.mouse.wheel(0, 180);
-    await expect.poll(() => viewport.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
-    expect(await width()).toBe(before);
-    await page.keyboard.down("Alt"); await page.keyboard.down("Control");
-  }
   if (preset === "ue") await page.keyboard.down("Control");
   await page.mouse.wheel(0, -600);
   if (preset === "ue") await page.keyboard.up("Control");
-  if (preset === "logic") { await page.keyboard.up("Control"); await page.keyboard.up("Alt"); }
   await expect.poll(width).toBeGreaterThan(before);
   await viewport.evaluate(el => { el.scrollLeft = 0; el.scrollTop = 0; });
   const readout = await page.getByRole("button", { name: "Current time" }).textContent();
@@ -200,4 +193,11 @@ test("rate fields accept free values, reject invalid input, and cancel with Esca
   await input.fill("6.125"); await page.getByLabel("Time display", { exact: true }).focus();
   await expect(rate).toHaveText("6.125x");
   await expect(input).toHaveValue("6.125");
+});
+
+test("saved Logic preferences fall back to Default", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("timeline-editor.demo.ui.v1", JSON.stringify({ timeline: { keyboardPreset: "logic" } })));
+  await page.goto("/");
+  await page.getByLabel("Timeline settings").click();
+  await expect(page.getByLabel("Operation preset")).toHaveValue("default");
 });

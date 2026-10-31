@@ -33,31 +33,31 @@ test("playback handles preview, commit once, cancel, and restore after reload", 
   await expect(out).toHaveAttribute("aria-valuetext", "192 f");
 });
 
-test("right drag over a clip pans without moving the clip or seeking; Escape cancels", async ({ page }) => {
+test("middle drag over a clip pans without moving the clip or seeking; Escape cancels", async ({ page }) => {
   await page.goto("/");
   const ruler = (await page.locator(".timeline-editor__ruler").boundingBox())!;
-  await page.mouse.move(ruler.x + 100, ruler.y + 5); await page.keyboard.down("Control"); await page.mouse.wheel(0, -900); await page.keyboard.up("Control");
+  await page.mouse.move(ruler.x + 100, ruler.y + 5); await page.mouse.wheel(0, -900);
   const viewport = page.locator(".timeline-editor__viewport");
   await viewport.evaluate(element => { element.scrollLeft = 0; });
   await expect.poll(() => viewport.evaluate(element => element.scrollWidth - element.clientWidth)).toBeGreaterThan(200);
   const clip = page.getByRole("button", { name: "Clip Animation", exact: true });
   const box = (await clip.boundingBox())!;
-  await page.mouse.move(box.x + 200, box.y + 20); await page.mouse.down({ button: "right" });
-  await page.mouse.move(box.x + 80, box.y + 20, { steps: 4 }); await page.mouse.up({ button: "right" });
+  await page.mouse.move(box.x + 200, box.y + 20); await page.mouse.down({ button: "middle" });
+  await page.mouse.move(box.x + 80, box.y + 20, { steps: 4 }); await page.mouse.up({ button: "middle" });
   await expect.poll(() => viewport.evaluate(element => element.scrollLeft)).toBeCloseTo(120, 0);
   await expect(clip).toHaveAttribute("data-start", "0");
   await expect(page.getByLabel("Animation preview")).toHaveAttribute("data-time", "0.000");
-  await page.mouse.move(box.x + 200, box.y + 20); await page.mouse.down({ button: "right" });
-  await page.mouse.move(box.x + 150, box.y + 20); await page.keyboard.press("Escape"); await page.mouse.up({ button: "right" });
+  await page.mouse.move(box.x + 200, box.y + 20); await page.mouse.down({ button: "middle" });
+  await page.mouse.move(box.x + 150, box.y + 20); await page.keyboard.press("Escape"); await page.mouse.up({ button: "middle" });
   await expect.poll(() => viewport.evaluate(element => element.scrollLeft)).toBeCloseTo(120, 0);
 });
 
-test("right pan also scrolls rows and keeps the track tree aligned", async ({ page }) => {
+test("middle pan also scrolls rows and keeps the track tree aligned", async ({ page }) => {
   await page.goto("/?stress=1");
   const viewport = page.locator(".timeline-editor__viewport");
   const box = (await viewport.boundingBox())!;
-  await page.mouse.move(box.x + 150, box.y + 150); await page.mouse.down({ button: "right" });
-  await page.mouse.move(box.x + 150, box.y + 50); await page.mouse.up({ button: "right" });
+  await page.mouse.move(box.x + 150, box.y + 150); await page.mouse.down({ button: "middle" });
+  await page.mouse.move(box.x + 150, box.y + 50); await page.mouse.up({ button: "middle" });
   await expect.poll(() => viewport.evaluate(element => element.scrollTop)).toBe(100);
   await expect.poll(() => page.locator(".timeline-editor__tree-viewport").evaluate(element => element.scrollTop)).toBe(100);
 });

@@ -155,13 +155,6 @@ describe("TimelineEditor transport and interaction boundary", () => {
     expect(playback.dispatch).toHaveBeenCalledWith({ type: "play", target });
   });
 
-  it("Logic Return seeks the loop start when stopped in cycle mode", () => {
-    const playback = controller({ looping: true, loopRange: { start: 1, end: 2 } });
-    render(<TimelineEditor dataSource={source()} playbackController={playback} initialViewState={{ keyboardPreset: "logic" }} />);
-    fireEvent.keyDown(screen.getByRole("application", { name: "Timeline scrubber" }), { key: "Enter" });
-    expect(playback.dispatch).toHaveBeenCalledWith({ type: "seek", time: 1, target });
-  });
-
   it("edits the playback rate and shows 1x when the controller omits rate", () => {
     const playback = controller();
     render(<TimelineEditor dataSource={source()} playbackController={playback} />);
@@ -294,7 +287,7 @@ describe("TimelineEditor transport and interaction boundary", () => {
     const view = render(<TimelineEditor dataSource={data} allowViewOutsideRange={false} onViewStateChange={state} initialViewState={{ viewExtent: { start: -100, end: 100 }, pixelsPerSecond: 1 }} />);
     const viewport = view.container.querySelector(".timeline-editor__viewport") as HTMLDivElement;
     const content = view.container.querySelector(".timeline-editor__content") as HTMLDivElement;
-    const wheel = (deltaY: number, shiftKey = false) => fireEvent.wheel(viewport, { deltaY, shiftKey, ctrlKey: !shiftKey, clientX: 150 });
+    const wheel = (deltaY: number, shiftKey = false) => fireEvent.wheel(viewport, { deltaY, shiftKey, clientX: 150 });
     expect(parseFloat(content.style.width)).toBe(300);
     act(() => { for (let i = 0; i < 20; i++) wheel(100); });
     expect(parseFloat(content.style.width)).toBe(300);
@@ -333,7 +326,7 @@ describe("TimelineEditor transport and interaction boundary", () => {
     const content = document.querySelector(".timeline-editor__content") as HTMLDivElement;
     const startWidth = parseFloat(content.style.width);
     act(() => {
-      for (let i = 0; i < 3; i++) fireEvent(viewport, new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true }));
+      for (let i = 0; i < 3; i++) fireEvent(viewport, new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true }));
     });
     // Three notches of -100px (wheel up = zoom in): exp(0.0015 * 300) ~= 1.568x, not a single notch's 1.16x.
     expect(parseFloat(content.style.width) / startWidth).toBeCloseTo(Math.exp(0.45), 3);
@@ -436,7 +429,7 @@ it("restores view preferences and does not emit again when only callback identit
   const changed = vi.fn();
   const dataSource = source();
   const { rerender } = render(<TimelineEditor dataSource={dataSource} initialViewState={{ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds" }} onViewStateChange={state => changed(state)} />);
-  expect(changed).toHaveBeenLastCalledWith({ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds", viewExtent: null, keyboardPreset: "ue", autoScroll: false });
+  expect(changed).toHaveBeenLastCalledWith({ treeWidth: 280, pixelsPerSecond: 200, rowZoom: 2, snap: false, displayMode: "seconds", viewExtent: null, keyboardPreset: "default", autoScroll: false });
   changed.mockClear();
   rerender(<TimelineEditor dataSource={dataSource} onViewStateChange={state => changed(state)} />);
   expect(changed).not.toHaveBeenCalled();
@@ -602,16 +595,12 @@ it("opens the host sidebar on item double-click and leaves its shortcuts host-ow
    fireEvent.keyDown(viewport, { key, altKey, ctrlKey: true });
    expect(playback.dispatch).not.toHaveBeenCalled();
  });
- it("uses Logic loop and return keys and reports preset changes for host persistence", () => {
-   const playback = controller(); const changed = vi.fn();
-   render(<TimelineEditor dataSource={source()} playbackController={playback} onViewStateChange={changed} />);
-   fireEvent.change(screen.getByLabelText("Operation preset"), { target: { value: "logic" } });
-   expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ keyboardPreset: "logic" }));
-   const viewport = screen.getByRole("application", { name: "Timeline scrubber" });
-   fireEvent.keyDown(viewport, { key: "c" });
-   expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "setLooping", looping: true, target });
-   fireEvent.keyDown(viewport, { key: "Enter" });
-   expect(playback.dispatch).toHaveBeenLastCalledWith({ type: "seek", time: 0, target });
+ it("reports explicit preset changes for host persistence", () => {
+   const changed = vi.fn();
+   render(<TimelineEditor dataSource={source()} onViewStateChange={changed} />);
+   expect(screen.getByLabelText("Operation preset")).toHaveProperty("value", "default");
+   fireEvent.change(screen.getByLabelText("Operation preset"), { target: { value: "ue" } });
+   expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ keyboardPreset: "ue" }));
  });
  it("commits range settings once, preserves a frame interval, and dispatches speed", () => {
    const playback = controller(); const changed = vi.fn();
