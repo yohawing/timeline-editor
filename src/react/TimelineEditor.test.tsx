@@ -275,6 +275,34 @@ describe("TimelineEditor transport and interaction boundary", () => {
     expect(onFrameRateChange).toHaveBeenCalledWith("60");
   });
 
+  it.each([0, -2])("bounds zoom and pan to the data range starting at %s", (start) => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(300);
+    const data = { ...source(), getRange: () => ({ start, end: start + 10 }) };
+    const state = vi.fn();
+    const view = render(<TimelineEditor dataSource={data} allowViewOutsideRange={false} onViewStateChange={state} initialViewState={{ viewExtent: { start: -100, end: 100 }, pixelsPerSecond: 1 }} />);
+    const viewport = view.container.querySelector(".timeline-editor__viewport") as HTMLDivElement;
+    const content = view.container.querySelector(".timeline-editor__content") as HTMLDivElement;
+    const wheel = (deltaY: number, shiftKey = false) => fireEvent.wheel(viewport, { deltaY, shiftKey, clientX: 150 });
+    expect(parseFloat(content.style.width)).toBe(300);
+    act(() => { for (let i = 0; i < 20; i++) wheel(100); });
+    expect(parseFloat(content.style.width)).toBe(300);
+    expect(viewport.scrollLeft).toBe(0);
+    expect(state.mock.lastCall?.[0].viewExtent).toBeNull();
+    wheel(-500);
+    expect(parseFloat(content.style.width)).toBeGreaterThan(300);
+    wheel(100000, true);
+    expect(viewport.scrollLeft).toBeCloseTo(parseFloat(content.style.width) - 300);
+    wheel(-100000, true);
+    expect(viewport.scrollLeft).toBe(0);
+    wheel(100000);
+    expect(parseFloat(content.style.width)).toBe(300);
+    expect(viewport.scrollLeft).toBe(0);
+    view.rerender(<TimelineEditor dataSource={{ ...data, getRange: () => ({ start: 0, end: 5 }) }} allowViewOutsideRange={false} />);
+    expect(parseFloat(content.style.width)).toBe(300);
+    expect(viewport.scrollLeft).toBe(0);
+    width.mockRestore();
+  });
+
   it("zooms row height with Ctrl+wheel and leaves the time axis alone", () => {
     render(<TimelineEditor dataSource={source()} frameRate={24} />);
     const root = document.querySelector(".timeline-editor") as HTMLElement;

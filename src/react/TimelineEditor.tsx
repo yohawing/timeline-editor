@@ -40,6 +40,7 @@ import {
 } from "../core/layout";
 import {
   clampPixelsPerSecond,
+  clampScrollLeft,
   clampRowZoom,
   fitPixelsPerSecond,
   panViewByFraction,
@@ -139,6 +140,8 @@ export interface TimelineEditorProps {
   onChangePlaybackRange?: (range: TimeRange) => void;
   /** Initial view preferences; persistence remains owned by the host. */
   initialViewState?: Partial<TimelineViewState>;
+  /** Allow zoom/pan beyond the data range. Defaults to true. */
+  allowViewOutsideRange?: boolean;
   onViewStateChange?: (state: TimelineViewState) => void;
   dataSource: TimelineDataSource;
   editing?: TimelineEditing | TimelineHostEditing;
@@ -506,6 +509,7 @@ export function TimelineEditor({
   onReorderRow,
   onToggleRow,
   initialViewState,
+  allowViewOutsideRange = true,
   onViewStateChange,
   playbackController,
   frameRate = 24,
@@ -570,7 +574,7 @@ export function TimelineEditor({
   );
   const dataRange = useMemo(() => safeRange(dataSource), [dataSource, revision]);
   const [viewExtent, setViewExtent] = useState<TimeRange | null>(() => isFiniteTimeRange(initialViewState?.viewExtent) && initialViewState!.viewExtent!.end > initialViewState!.viewExtent!.start ? initialViewState!.viewExtent! : null);
-  const range = useMemo(() => ({ start: Math.min(dataRange.start, viewExtent?.start ?? dataRange.start), end: Math.max(dataRange.end, viewExtent?.end ?? dataRange.end) }), [dataRange.start, dataRange.end, viewExtent]);
+  const range = useMemo(() => allowViewOutsideRange ? ({ start: Math.min(dataRange.start, viewExtent?.start ?? dataRange.start), end: Math.max(dataRange.end, viewExtent?.end ?? dataRange.end) }) : dataRange, [dataRange, viewExtent, allowViewOutsideRange]);
   const rangeRef = useRef(range);
   rangeRef.current = range;
   const duration = Math.max(0, range.end - range.start);
@@ -589,7 +593,7 @@ export function TimelineEditor({
   const [zoomPixelsPerSecond, setZoomPixelsPerSecond] = useState<number | null>(() => Number.isFinite(initialViewState?.pixelsPerSecond) && initialViewState!.pixelsPerSecond! > 0 ? initialViewState!.pixelsPerSecond! : null);
   const pixelsPerSecond = zoomPixelsPerSecond === null
     ? fitPixelsPerSecond(duration, viewport.width)
-    : clampPixelsPerSecond(zoomPixelsPerSecond, duration, viewport.width, true);
+    : clampPixelsPerSecond(zoomPixelsPerSecond, duration, viewport.width, allowViewOutsideRange);
   /**
    * Vertical zoom (Ctrl+wheel): a multiplier on `--timeline-row-height`,
    * applied as `--timeline-row-zoom` on the root element. The row-height
@@ -670,9 +674,12 @@ export function TimelineEditor({
     pendingViewRef.current = null;
     const pending = pendingScrollLeftRef.current;
     const element = timelineViewportRef.current;
-    if (pending === null || !element) return;
+    if (!element) return;
     pendingScrollLeftRef.current = null;
-    element.scrollLeft = pending;
+    const left = allowViewOutsideRange ? pending : clampScrollLeft(pending ?? element.scrollLeft, duration, pixelsPerSecond, viewport.width);
+    if (left === null) return;
+    element.scrollLeft = left;
+    if (!allowViewOutsideRange) setScroll((current) => current.left === left ? current : { ...current, left });
   });
 
   useEffect(() => {
@@ -1009,16 +1016,20 @@ export function TimelineEditor({
   const applyView = useCallback((desired: ViewRange) => {
     const current = rangeRef.current;
     const width = timelineViewportRef.current?.clientWidth ?? 0;
-    const start = Math.min(current.start, current.start + desired.scrollLeft / desired.pixelsPerSecond);
-    const end = Math.max(current.end, current.start + (desired.scrollLeft + width) / desired.pixelsPerSecond);
+    if (!allowViewOutsideRange) {
+      const pps = clampPixelsPerSecond(desired.pixelsPerSecond, current.end - current.start, width);
+      desired = { pixelsPerSecond: pps, scrollLeft: clampScrollLeft(desired.scrollLeft, current.end - current.start, pps, width) };
+    }
+    const start = allowViewOutsideRange ? Math.min(current.start, current.start + desired.scrollLeft / desired.pixelsPerSecond) : current.start;
+    const end = allowViewOutsideRange ? Math.max(current.end, current.start + (desired.scrollLeft + width) / desired.pixelsPerSecond) : current.end;
     const next = { ...desired, scrollLeft: desired.scrollLeft + (current.start - start) * desired.pixelsPerSecond };
     rangeRef.current = { start, end };
-    setViewExtent({ start, end });
+    setViewExtent(allowViewOutsideRange ? { start, end } : null);
     pendingViewRef.current = next;
     setZoomPixelsPerSecond(next.pixelsPerSecond);
     pendingScrollLeftRef.current = next.scrollLeft;
     setScroll((current) => (current.left === next.scrollLeft ? current : { ...current, left: next.scrollLeft }));
-  }, []);
+  }, [allowViewOutsideRange]);
 
   const viewRef = useRef<{ pixelsPerSecond: number; duration: number; width: number }>({ pixelsPerSecond, duration, width: viewport.width });
   viewRef.current = { pixelsPerSecond, duration, width: viewport.width };
@@ -1062,7 +1073,7 @@ export function TimelineEditor({
         anchorX,
         clipDuration,
         width,
-        true,
+        allowViewOutsideRange,
       ));
     };
     const rulerElement = rulerRef.current;
@@ -1072,7 +1083,7 @@ export function TimelineEditor({
       viewportElement.removeEventListener("wheel", onWheel);
       rulerElement?.removeEventListener("wheel", onWheel);
     };
-  }, [applyView]);
+  }, [applyView, allowViewOutsideRange]);
 
   const thumb = viewRangeThumb({ pixelsPerSecond, scrollLeft: scroll.left }, duration, viewport.width);
 
@@ -1128,7 +1139,7 @@ export function TimelineEditor({
       ? { start: drag.thumb.start + dx, end: drag.thumb.end }
       : { start: drag.thumb.start, end: drag.thumb.end + dx };
     applyDrag(viewRangeFromThumb(next, dragDuration, width, drag.mode === "start" ? "end" : "start", true));
-  }, [applyView]);
+  }, [applyView, allowViewOutsideRange]);
 
   const onRangeBarPointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = rangeDragRef.current;

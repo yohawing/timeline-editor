@@ -301,3 +301,5 @@ Set `theme="light"` for the built-in light palette; dark remains the default.
 Changing this prop repaints the existing Canvas without resetting the view.
 Legacy `--timeline-canvas-*` overrides remain supported and take precedence over
 the corresponding shared `--timeline-*` color token for Canvas painting.
+
+Hosts can set `allowViewOutsideRange={false}` to bound time-axis zoom and pan to `dataSource.getRange()`, while keeping loop In/Out independently editable. The default remains unrestricted browsing.
