@@ -1,6 +1,7 @@
 import { readProject, writeProject, type SavedProject } from "./projectStorage";
 import { TimeField } from "./TimeField";
 import { TrackIcon } from "./TrackIcon";
+import { HistoryIcon } from "./HistoryIcon";
 import { TrackMenu } from "./TrackMenu";
 import { useEffect, useRef, useState } from "react";
 import { createTimelineAudio } from "@yohawing/timeline-editor/audio";
@@ -468,8 +469,8 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
   const changePlaybackRange = (range: TimeRange) => { if (range.end > range.start && (range.start !== playbackRange.start || range.end !== playbackRange.end)) commit({ ...current.current, playbackRange: range }); };
   const toolbar = <>
     <span className="example-save-state" role="status" aria-label={`${projectName}: ${saveStatus}`} title={`${projectName} · ${saveStatus}`}>{projectName}{!ready || storageError || saving ? "*" : ""}</span>
-    <button className="timeline-editor__button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.current.length} onClick={undo}>↶</button>
-    <button className="timeline-editor__button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!future.current.length} onClick={redo}>↷</button>
+    <button className="timeline-editor__button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.current.length} onClick={undo}><HistoryIcon action="undo" /></button>
+    <button className="timeline-editor__button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled={!future.current.length} onClick={redo}><HistoryIcon action="redo" /></button>
   </>;
   const renameRow = (id: RowId, label: string) => commit({ ...current.current, tracks: current.current.tracks.map(track => track.id === id ? { ...track, label } : track) });
   return { document, changePlaybackRange, collapsed, toggleRow, moveRow, reorderRow, ready, saving, toolbar, addTrack, rowIcon, rowActions, renameRow, filePicker, editing, eventEditing, properties: eventProperties ?? properties, preview, controller: wrapped, error, dismissError: () => setError("") };
