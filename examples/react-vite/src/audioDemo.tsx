@@ -149,7 +149,8 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
     if (!next.playbackRange) return;
     const range = controller.getSnapshot().range;
     if (range?.start !== next.playbackRange.start || range?.end !== next.playbackRange.end) {
-      void Promise.resolve(controller.dispatch({ type: "setPlaybackRange", range: next.playbackRange, target: null })).catch(report);
+      try { void Promise.resolve(controller.dispatch({ type: "setPlaybackRange", range: next.playbackRange, target: null })).catch(report); }
+      catch (reason) { report(reason); }
     }
   };
   const publish = (next: Document) => {

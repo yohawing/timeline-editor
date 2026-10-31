@@ -551,3 +551,72 @@ test("native looped audio at 2x wraps the source and stops at the clip boundary"
   expect(result.lastClick).toBeGreaterThan(1);
   expect(result.afterEnd).toBeLessThan(0.1);
 });
+
+test("invalid saved volume is rejected without overwriting the project", async ({ page }) => {
+  await page.goto("/");
+  await drop(page, 0, 0, "volume.wav");
+  await expect(page.getByRole("button", { name: "Clip volume.wav" })).toBeVisible();
+  await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
+  await page.evaluate(async () => {
+    const storage = await import(/* @vite-ignore */ "/src/projectStorage.ts");
+    const project = await storage.readProject("default");
+    project.document.clips.find(clip => clip.label === "volume.wav").volume = NaN;
+    await storage.writeProject("default", project);
+  });
+  await page.reload();
+  await expect(page.getByRole("alert")).toContainText("automatic saving is disabled");
+  await addTrack(page, "event");
+  await page.reload();
+  await expect(page.getByRole("alert")).toContainText("automatic saving is disabled");
+});
+
+test("synchronous playback range rejection reports an error without losing edits", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto("/?reject=sync");
+  const handle = page.getByRole("slider", { name: "Playback range end", exact: true });
+  const box = (await handle.boundingBox())!;
+  const width = (await page.locator(".timeline-editor__content").boundingBox())!.width;
+  await page.mouse.move(box.x + 4, box.y + 6); await page.mouse.down();
+  await page.mouse.move(box.x + 4 - width / 3, box.y + 6, { steps: 5 }); await page.mouse.up();
+  await expect(page.getByRole("alert")).toContainText("rejected synchronously");
+  await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
+  const end = await page.evaluate(async () => {
+    const storage = await import(/* @vite-ignore */ "/src/projectStorage.ts");
+    return (await storage.readProject("default")).document.playbackRange.end;
+  });
+  expect(end).toBe(8);
+  expect(errors).toEqual([]);
+});
+
+test("an already started old transaction commits before the newer session write", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("main")).toHaveAttribute("data-project-state", "ready");
+  const result = await page.evaluate(async () => {
+    const storage = await import(/* @vite-ignore */ "/src/projectStorage.ts");
+    const original = IDBDatabase.prototype.transaction;
+    let current = true;
+    let start!: () => void;
+    const started = new Promise<void>(resolve => { start = resolve; });
+    const order: string[] = [];
+    let count = 0;
+    IDBDatabase.prototype.transaction = function(...args) {
+      const tx = original.apply(this, args);
+      if (args[1] === "readwrite") {
+        const name = ++count === 1 ? "old" : "new";
+        tx.addEventListener("complete", () => order.push(name));
+        if (name === "old") queueMicrotask(() => { current = false; start(); });
+      }
+      return tx;
+    };
+    try {
+      const document = { tracks: [], clips: [] };
+      const old = storage.writeProject("transaction-order", { version: 1, document, audio: [] }, () => current);
+      await started;
+      await storage.writeProject("transaction-order", { version: 1, document: { ...document, playbackRange: { start: 0, end: 9 } }, audio: [] });
+      await old;
+      return { order, end: (await storage.readProject("transaction-order")).document.playbackRange.end };
+    } finally { IDBDatabase.prototype.transaction = original; }
+  });
+  expect(result).toEqual({ order: ["old", "new"], end: 9 });
+});

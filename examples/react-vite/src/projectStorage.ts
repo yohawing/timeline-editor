@@ -28,6 +28,7 @@ function validProject(value: SavedProject): boolean {
   if (new Set(tracks.map(track => track.id)).size !== tracks.length || new Set(clips.map(clip => clip?.id)).size !== clips.length) return false;
   if (!clips.every(clip => clip && clip.kind === "clip" && typeof clip.id === "string" && typeof clip.label === "string" && tracks.some(track => track.id === clip.rowId)
     && Number.isFinite(clip.range?.start) && Number.isFinite(clip.range?.end) && clip.range.end > clip.range.start
+    && (clip.volume === undefined || (Number.isFinite(clip.volume) && clip.volume >= 0 && clip.volume <= 2))
     && (clip.sourceOffset === undefined || (Number.isFinite(clip.sourceOffset) && clip.sourceOffset >= 0))
     && (clip.sourceDuration === undefined || (Number.isFinite(clip.sourceDuration) && clip.sourceDuration > 0))
     && (clip.waveform === undefined || (Array.isArray(clip.waveform) && clip.waveform.every(Number.isFinite))))) return false;

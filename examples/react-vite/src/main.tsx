@@ -56,7 +56,7 @@ function Example(): JSX.Element {
     preferences.saveTimeline(state);
   }, [preferences.saveTimeline]);
   const malformed = params.get("malformed") === "1";
-  const reject = params.get("reject") === "1";
+  const reject = params.get("reject");
   const dataSource = useMemo(() => stress ? createStressTimelineDataSource() : createPreviewTimeline(), [stress]);
   const playbackController = useMemo(() => {
     if (malformed) return createMalformedPlaybackController();
@@ -65,7 +65,7 @@ function Example(): JSX.Element {
     return {
       getSnapshot: local.getSnapshot,
       subscribe: local.subscribe,
-      dispatch: () => Promise.reject(new Error("example transport rejected")),
+      dispatch: () => { if (reject === "sync") throw new Error("example transport rejected synchronously"); return Promise.reject(new Error("example transport rejected")); },
     } satisfies TimelinePlaybackController;
   }, [malformed, reject]);
   const motion = useMemo(() => stress ? null : dataSource.getItems({ rowIds: dataSource.getRows({ start: 0, count: dataSource.getRowCount() }).map(row => row.id), range: dataSource.getRange() }).find((item): item is TimelineClip => item.kind === "clip" && item.id === "preview-animation") ?? null, [dataSource, stress]);
