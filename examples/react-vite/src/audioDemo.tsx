@@ -247,19 +247,21 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
   }, [controller, projectKey]);
   useEffect(() => {
     let frame = 0;
+    // Computed style is live: reuse the object while CSS keeps its values current.
+    const palette = preview.current ? getComputedStyle(preview.current) : null;
     const tick = () => {
       sync();
       const canvas = preview.current;
       const context = canvas?.getContext("2d");
       const value = sample();
-      if (canvas && context) {
+      if (canvas && context && palette) {
         const bounds = canvas.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1;
         const w = Math.max(1, Math.round(bounds.width * dpr)); const h = Math.max(1, Math.round(bounds.height * dpr));
         if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
         context.setTransform(dpr, 0, 0, dpr, 0, 0);
         const width = bounds.width, height = bounds.height;
-        context.fillStyle = "#14171d"; context.fillRect(0, 0, width, height);
-        context.strokeStyle = "#282e39"; context.lineWidth = 1;
+        context.fillStyle = palette.getPropertyValue("--example-preview-bg").trim(); context.fillRect(0, 0, width, height);
+        context.strokeStyle = palette.getPropertyValue("--example-preview-floor").trim(); context.lineWidth = 1;
         const floor = height * 0.7;
         context.beginPath(); context.moveTo(0, floor); context.lineTo(width, floor); context.stroke();
         const animations = current.current.clips.filter(clip => typeOf(clip) === "animation" && enabled(clip));
@@ -271,9 +273,9 @@ export function useAudioDemo(controller: TimelinePlaybackController, motion: Tim
         const phase = motionTime % 1;
         const x = width * (0.15 + motionTime / 12 * 0.7);
         const y = floor - 24 - Math.sin(phase * Math.PI) * Math.min(100, height * 0.25);
-        context.fillStyle = phase < 0.08 ? "#ffd783" : "#72bfc8";
+        context.fillStyle = palette.getPropertyValue(phase < 0.08 ? "--example-preview-pulse" : "--example-preview-marker").trim();
         if (motionClip) { context.beginPath(); context.arc(x, y, 23, 0, Math.PI * 2); context.fill(); }
-        context.fillStyle = "#8d98aa"; context.font = "12px Consolas, monospace";
+        context.fillStyle = palette.getPropertyValue("--example-preview-label").trim(); context.font = "12px Consolas, monospace";
         context.fillText(timeDisplayRef.current.displayMode === "frames" ? `${Math.round(value.time * timeDisplayRef.current.fps)} f` : `${value.time.toFixed(2)} s`, 18, 26);
         canvas.dataset.time = value.time.toFixed(3);
       }

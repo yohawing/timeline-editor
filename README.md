@@ -248,3 +248,32 @@ steps a frame, Escape cancels a drag and Delete removes the selected trigger.
 The optional `eventEditing` callbacks leave event data and evaluation host-owned;
 the library does not dispatch application events during playback. Existing demo
 Event Clips migrate to triggers at their start times on load.
+
+### Theme colors and Canvas
+
+Concrete UI color defaults live in the palette at the top of `styles.css`.
+Both DOM styles and Canvas painting consume `--timeline-*` variables; there is
+no second TypeScript palette. Clip/track colors supplied by the host remain data.
+Override variables on the editor, for example:
+
+```css
+[data-theme="light"] .timeline-editor {
+  --timeline-surface-1: #f5f6f8;
+  --timeline-surface-2: #e9ecf1;
+  --timeline-text: #202630;
+  --timeline-row-even: #f5f6f8;
+  --timeline-row-odd: #edf0f5;
+  --timeline-row-divider: #ccd2dc;
+  --timeline-grid-major: #b8c0cc;
+  --timeline-grid-frame: #d0d6df;
+  --timeline-grid-minor: #dde2e9;
+  --timeline-clip-text: #18202b;
+}
+```
+
+Canvas refreshes after editor/ancestor attribute changes (including class,
+style and data-theme), style/link updates in the document head, stylesheet load,
+window resize, ancestor transition completion, and color-scheme/forced-colors media changes. Reads are coalesced
+per animation frame and unchanged palettes do not cause Canvas repaints.
+The demo's own preview and controls use separate `--example-*` variables in
+`example.css`; library styles do not impose colors on the host application's preview.

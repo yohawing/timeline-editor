@@ -1,38 +1,64 @@
+:root {
+  --example-page-bg: #101216;
+  --example-text: #d6d6dc;
+  --example-pane-border: #343a46;
+  --example-preview-bg: #14171d;
+  --example-error-bg: #412b2b;
+  --example-error-text: #ffd0c9;
+  --example-error-border: #82544e;
+  --example-control-hover: #303641;
+  --example-focus: #85a9df;
+  --example-menu-bg: #252932;
+  --example-menu-border: #414957;
+  --example-menu-shadow: #0008;
+  --example-menu-text: #e0e5ee;
+  --example-menu-hover: #3b485f;
+  --example-muted-text: #8995a8;
+  --example-action-hover: #3a4454;
+  --example-action-hover-text: #edf2fa;
+  --example-action-active: #68502a;
+  --example-action-active-text: #ffe0a0;
+  --example-divider-hover: #6c91bc66;
+  --example-preview-floor: #282e39;
+  --example-preview-pulse: #ffd783;
+  --example-preview-marker: #72bfc8;
+  --example-preview-label: #8d98aa;
+}
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; height: 100%; margin: 0; }
-body { background: #101216; color: #d6d6dc; font: 13px Inter, "Segoe UI", sans-serif; }
-.example-shell { display: grid; grid-template-rows: minmax(120px, 1fr) minmax(220px, 42%); width: 100%; height: 100%; gap: 1px; background: #343a46; }
-.example-preview { min-height: 0; overflow: hidden; background: #14171d; }
+body { background: var(--example-page-bg); color: var(--example-text); font: 13px Inter, "Segoe UI", sans-serif; }
+.example-shell { display: grid; grid-template-rows: minmax(120px, 1fr) minmax(220px, 42%); width: 100%; height: 100%; gap: 1px; background: var(--example-pane-border); }
+.example-preview { min-height: 0; overflow: hidden; background: var(--example-preview-bg); }
 .example-preview canvas { display: block; width: 100%; height: 100%; }
 .example-editor { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 .example-editor .timeline-editor { height: 100%; --timeline-row-height: 2.75rem; }
-.example-error { position: absolute; right: 12px; bottom: 24px; z-index: 10; max-width: 80%; padding: 10px; background: #412b2b; color: #ffd0c9; border: 1px solid #82544e; }
+.example-error { position: absolute; right: 12px; bottom: 24px; z-index: 10; max-width: 80%; padding: 10px; background: var(--example-error-bg); color: var(--example-error-text); border: 1px solid var(--example-error-border); }
 .example-error button { margin-left: 12px; color: inherit; background: transparent; border: 0; cursor: pointer; }
 .example-editor .timeline-editor__row-binding { display: none; }
 
-.example-add-track { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 1.25rem; height: 1.25rem; padding: 0; border: 0; border-radius: 3px; color: #d6d6dc; background: transparent; cursor: pointer; }
+.example-add-track { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 1.25rem; height: 1.25rem; padding: 0; border: 0; border-radius: 3px; color: var(--example-text); background: transparent; cursor: pointer; }
 .example-add-track svg { display: block; }
-.example-add-track:hover { background: #303641; }
-.example-add-track:focus-visible { outline: 1px solid #85a9df; outline-offset: 1px; }
+.example-add-track:hover { background: var(--example-control-hover); }
+.example-add-track:focus-visible { outline: 1px solid var(--example-focus); outline-offset: 1px; }
 
 .example-preview, .example-editor { grid-column: 1; }
 
-.example-track-menu { position: fixed; inset: auto; margin: 0; width: 160px; padding: 4px; background: #252932; border: 1px solid #414957; border-radius: 4px; box-shadow: 0 8px 24px #0008; }
-.example-track-menu button { display: block; width: 100%; border: 0; border-radius: 2px; padding: 7px 10px; text-align: left; background: transparent; color: #e0e5ee; cursor: pointer; }
-.example-track-menu button:hover, .example-track-menu button:focus-visible { background: #3b485f; outline: none; }
+.example-track-menu { position: fixed; inset: auto; margin: 0; width: 160px; padding: 4px; background: var(--example-menu-bg); border: 1px solid var(--example-menu-border); border-radius: 4px; box-shadow: 0 8px 24px var(--example-menu-shadow); }
+.example-track-menu button { display: block; width: 100%; border: 0; border-radius: 2px; padding: 7px 10px; text-align: left; background: transparent; color: var(--example-menu-text); cursor: pointer; }
+.example-track-menu button:hover, .example-track-menu button:focus-visible { background: var(--example-menu-hover); outline: none; }
 
-.example-track-action { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; color: #8995a8; border-radius: 3px; cursor: pointer; font-family: inherit; font-size: var(--timeline-track-font-size, 0.65rem); font-weight: 600; line-height: 1rem; }
-.example-track-action:hover, .example-track-action:focus-visible { background: #3a4454; color: #edf2fa; }
-.example-track-action[aria-pressed="true"] { background: #68502a; color: #ffe0a0; }
+.example-track-action { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; color: var(--example-muted-text); border-radius: 3px; cursor: pointer; font-family: inherit; font-size: var(--timeline-track-font-size, 0.65rem); font-weight: 600; line-height: 1rem; }
+.example-track-action:hover, .example-track-action:focus-visible { background: var(--example-action-hover); color: var(--example-action-hover-text); }
+.example-track-action[aria-pressed="true"] { background: var(--example-action-active); color: var(--example-action-active-text); }
 
 .example-track-action:disabled { opacity: 0.35; cursor: default; }
 
 .example-preview { grid-row: 1; }
 .example-editor { grid-row: 2; }
 .example-pane-divider { grid-column: 1; grid-row: 2; align-self: start; position: relative; z-index: 15; height: 6px; transform: translateY(-3px); cursor: row-resize; touch-action: none; }
-.example-pane-divider:hover, .example-pane-divider:focus-visible { background: #6c91bc66; outline: none; }
+.example-pane-divider:hover, .example-pane-divider:focus-visible { background: var(--example-divider-hover); outline: none; }
 
-.example-save-state { font-size: 9px; color: #8995a8; padding: 0 4px; white-space: nowrap; }
+.example-save-state { font-size: 9px; color: var(--example-muted-text); padding: 0 4px; white-space: nowrap; }
 
 
 .example-editor .timeline-editor__row-actions { display: grid; grid-template-columns: repeat(3, 20px); gap: 4px; align-items: center; }

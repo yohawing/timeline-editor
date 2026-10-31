@@ -60,6 +60,6 @@ export function EventCue({ cue, editing, rowIndex, rowHeight, scale, range, fps,
         if (next !== cue.time) editing.onMove(cue.id, next);
       }
     }}>
-    <svg style={{ transform: `translateX(${x - hitLeft - 10}px)` }} width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 1 L9 5 L5 9 L1 5 Z" fill="currentColor" stroke={editing.selectedId === cue.id ? "#ffe08a" : "currentColor"} /></svg>
+    <svg style={{ transform: `translateX(${x - hitLeft - 10}px)` }} width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 1 L9 5 L5 9 L1 5 Z" fill="currentColor" stroke="currentColor" /></svg>
   </button>;
 }

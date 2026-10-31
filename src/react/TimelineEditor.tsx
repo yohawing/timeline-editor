@@ -64,6 +64,7 @@ import { PlaybackRangeHandles } from "./PlaybackRangeHandles";
 import { useMiddlePan } from "./useMiddlePan";
 import { RowLabel } from "./RowLabel";
 import { TrackDivider } from "./TrackDivider";
+import { useCanvasTheme, type CanvasColors } from "./canvasTheme";
 import { EventCue, type TimelineEventEditing } from "./EventCue";
 export type { TimelineEventEditing } from "./EventCue";
 import { useClipEditing, type TimelineEditing } from "./clipEditing";
@@ -284,6 +285,7 @@ function drawItem(
   timeToX: (time: number) => number,
   rowHeight: number,
   visibleRange: TimeRange,
+  colors: CanvasColors,
 ): void {
   const rowY = rowIndex * rowHeight;
   // Every pixel constant below was drawn for the 26px design row; scale them
@@ -300,14 +302,14 @@ function drawItem(
     context.fillStyle = item.color;
     context.fill();
     context.globalAlpha = opacity;
-    context.strokeStyle = item.selected ? "#f1f3ff" : "rgba(255,255,255,.16)";
+    context.strokeStyle = item.selected ? colors.selection : colors["clip-border"];
     context.lineWidth = item.selected ? 1.5 : 1;
     context.stroke();
     context.save();
     context.beginPath();
     context.rect(x + 7 * s, rowY + 4 * s, Math.max(0, width - 14 * s), 18 * s);
     context.clip();
-    context.fillStyle = "rgba(255,255,255,.9)";
+    context.fillStyle = colors["clip-text"];
     context.font = `500 ${10 * s}px Inter, Segoe UI, sans-serif`;
     context.textBaseline = "middle";
     context.fillText(item.label, x + 8 * s, rowY + 13 * s);
@@ -317,7 +319,7 @@ function drawItem(
       const offset = item.sourceOffset ?? 0;
       const first = Math.max(1, Math.ceil((offset + Math.max(0, visibleRange.start - item.range.start)) / period));
       const last = Math.floor((offset + Math.min(item.range.end, visibleRange.end) - item.range.start) / period);
-      context.strokeStyle = "rgba(255,255,255,.75)";
+      context.strokeStyle = colors["clip-loop-line"];
       for (let cycle = first; cycle <= last; cycle++) {
         const time = item.range.start + cycle * period - offset;
         if (time <= item.range.start || time >= item.range.end) continue;
@@ -354,7 +356,7 @@ function drawItem(
     context.arc(x, rowY + 13 * s, 5 * s, 0, Math.PI * 2);
     context.fill();
   }
-  context.fillStyle = "rgba(238,238,244,.78)";
+  context.fillStyle = colors["cue-label"];
   context.font = `500 ${9 * s}px Inter, Segoe UI, sans-serif`;
   context.textBaseline = "middle";
   if (item.kind !== "event-cue") context.fillText(item.label, x + 9 * s, rowY + 13 * s);
@@ -367,6 +369,7 @@ function drawKey(
   rowIndex: number,
   timeToX: (time: number) => number,
   rowHeight: number,
+  colors: CanvasColors,
 ): void {
   const s = rowHeight / TIMELINE_ROW_HEIGHT;
   const x = timeToX(key.time);
@@ -378,9 +381,9 @@ function drawKey(
   context.lineTo(x, y + radius);
   context.lineTo(x - radius, y);
   context.closePath();
-  context.fillStyle = key.selected ? "#fff" : "rgba(230,232,255,.78)";
+  context.fillStyle = key.selected ? colors["key-selected"] : colors.key;
   context.fill();
-  context.strokeStyle = "rgba(24,24,31,.9)";
+  context.strokeStyle = colors["key-border"];
   context.lineWidth = 1;
   context.stroke();
 }
@@ -391,6 +394,7 @@ function drawKeyColumn(
   rowIndex: number,
   timeToX: (time: number) => number,
   rowHeight: number,
+  colors: CanvasColors,
 ): void {
   if (column.count <= 1) {
     drawKey(context, {
@@ -399,17 +403,20 @@ function drawKeyColumn(
       rowId: column.rowId,
       channelId: column.channelId,
       time: column.time,
-    }, rowIndex, timeToX, rowHeight);
+    }, rowIndex, timeToX, rowHeight, colors);
     return;
   }
   const x = Math.round(timeToX(column.time)) + 0.5;
   const y = rowIndex * rowHeight + 13;
-  context.strokeStyle = `rgba(230,232,255,${Math.min(1, .3 + Math.log2(column.count) / 8)})`;
+  context.save();
+  context.globalAlpha *= Math.min(1, .3 + Math.log2(column.count) / 8);
+  context.strokeStyle = colors["key-column"];
   context.lineWidth = Math.min(4, 1 + Math.log2(column.count) / 3);
   context.beginPath();
   context.moveTo(x, y - 9);
   context.lineTo(x, y + 9);
   context.stroke();
+  context.restore();
 }
 
 function dispatchSafely(
@@ -552,6 +559,8 @@ export function TimelineEditor({
   const panHandlers = useMiddlePan(timelineViewportRef);
   const treeViewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rootRef = useRef<HTMLElement>(null);
+  const colors = useCanvasTheme(rootRef);
   const playheadRef = useRef<HTMLDivElement>(null);
   const readoutRef = useRef<HTMLButtonElement>(null);
   const rowHeightProbeRef = useRef<HTMLDivElement>(null);
@@ -1034,7 +1043,7 @@ export function TimelineEditor({
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || viewport.width <= 0 || viewport.height <= 0) return;
+    if (!canvas || !colors || viewport.width <= 0 || viewport.height <= 0) return;
     const startedAt = performance.now();
     const dpr = devicePixelRatio;
     canvas.width = Math.max(1, Math.round(viewport.width * dpr));
@@ -1060,9 +1069,9 @@ export function TimelineEditor({
       const row = rows[index - rowQuery.start];
       if (!row) continue;
       const y = index * rowHeight;
-      context.fillStyle = row.kind === "group" ? "#22242d" : index % 2 === 0 ? "#1c1e25" : "#191b21";
+      context.fillStyle = row.kind === "group" ? colors["row-group"] : index % 2 === 0 ? colors["row-even"] : colors["row-odd"];
       context.fillRect(scroll.left, y, viewport.width, rowHeight);
-      context.strokeStyle = "rgba(255,255,255,.055)";
+      context.strokeStyle = colors["row-divider"];
       context.beginPath();
       context.moveTo(scroll.left, y + rowHeight - .5);
       context.lineTo(scroll.left + viewport.width, y + rowHeight - .5);
@@ -1080,7 +1089,7 @@ export function TimelineEditor({
       const gridTime = index * gridStep;
       const x = Math.round(transform.timeToX(gridTime)) + .5;
       const onSecond = Math.abs(gridTime - Math.round(gridTime)) < gridStep * .01;
-      context.strokeStyle = onSecond ? "rgba(255,255,255,.16)" : frameGrid ? "rgba(255,255,255,.085)" : "rgba(255,255,255,.045)";
+      context.strokeStyle = onSecond ? colors["grid-major"] : frameGrid ? colors["grid-frame"] : colors["grid-minor"];
       context.beginPath();
       context.moveTo(x, scroll.top);
       context.lineTo(x, scroll.top + viewport.height);
@@ -1094,17 +1103,17 @@ export function TimelineEditor({
       const rowIndex = rowIndexById.get(item.rowId);
       if (item.kind === "clip" && editing?.canEditClip(item)) continue;
       if (item.kind === "event-cue" && eventEditing?.canEdit(item)) continue;
-      if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, item, rowIndex, transform.timeToX, rowHeight, visibleTimeRange);
+      if (rowIndex != null && clippedRows.has(item.rowId)) drawItem(context, item, rowIndex, transform.timeToX, rowHeight, visibleTimeRange, colors);
     }
     if (columns.length > 0) {
       for (const column of columns) {
         const rowIndex = rowIndexById.get(column.rowId);
-        if (rowIndex != null) drawKeyColumn(context, column, rowIndex, transform.timeToX, rowHeight);
+        if (rowIndex != null) drawKeyColumn(context, column, rowIndex, transform.timeToX, rowHeight, colors);
       }
     } else {
       for (const key of keys) {
         const rowIndex = rowIndexById.get(key.rowId);
-        if (rowIndex != null) drawKey(context, key, rowIndex, transform.timeToX, rowHeight);
+        if (rowIndex != null) drawKey(context, key, rowIndex, transform.timeToX, rowHeight, colors);
       }
     }
     context.restore();
@@ -1116,7 +1125,7 @@ export function TimelineEditor({
       keysPainted: columns.length > 0 ? columns.length : keys.length,
       devicePixelRatio: dpr,
     });
-  }, [editing, eventEditing, dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
+  }, [colors, editing, eventEditing, dataSource, devicePixelRatio, pixelsPerSecond, range.end, range.start, revision, rowHeight, rowIds, rowQuery.start, rows, scroll.left, scroll.top, visibleQuery, viewport.height, viewport.width, onPerformanceSummary, visibleTimeRange.start, visibleTimeRange.end]);
 
   // Tick labels use a monospace font. Measuring a fixed sample tracks host font
   // size changes without coupling label layout to whichever ticks were rendered.
@@ -1153,7 +1162,7 @@ export function TimelineEditor({
   } : undefined;
 
   return (
-    <section data-view-start={range.start} data-view-end={range.end} onKeyDown={onViewportKeyDown} className={rootClassName} aria-label="Timeline editor" style={{ "--timeline-row-zoom": rowZoom, ...(treeWidth === null ? {} : { "--timeline-tree-width": `min(${treeWidth}px, max(120px, calc(100% - 160px)))` }) } as CSSProperties}>
+    <section ref={rootRef} data-view-start={range.start} data-view-end={range.end} onKeyDown={onViewportKeyDown} className={rootClassName} aria-label="Timeline editor" style={{ "--timeline-row-zoom": rowZoom, ...(treeWidth === null ? {} : { "--timeline-tree-width": `min(${treeWidth}px, max(120px, calc(100% - 160px)))` }) } as CSSProperties}>
       <div ref={rowHeightProbeRef} className="timeline-editor__row-height-probe" aria-hidden="true" />
       <header className="timeline-editor__header">
         <div className="timeline-editor__toolbar">
@@ -1387,7 +1396,7 @@ function TimelineRowView({
         else onReorder?.(id, row.id, position);
       }}
       style={{ transform: `translateY(${index * rowHeight}px)` }} {...(actions || onRename ? {} : targetProps)}>
-      <span className="timeline-editor__row-color" style={{ backgroundColor: row.color ?? "#6c7284" }} />
+      <span className="timeline-editor__row-color" style={{ backgroundColor: row.color }} />
       <span aria-hidden="true" style={{ flex: `0 0 ${Math.max(0, row.depth) * 16}px` }} />
       {row.kind === "group" && (onToggle ? <button type="button" className="timeline-editor__row-disclosure" title={row.expanded === false ? "Expand group" : "Collapse group"} aria-label={`${row.expanded === false ? "Expand" : "Collapse"} ${row.label}`} aria-expanded={row.expanded !== false} onClick={event => { event.stopPropagation(); onToggle(row.id); }}>{row.expanded === false ? "▸" : "▾"}</button> : <span className="timeline-editor__row-disclosure">▾</span>)}
       {icon && <span className="timeline-editor__row-icon">{icon}</span>}
