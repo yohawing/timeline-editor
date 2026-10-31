@@ -74,6 +74,8 @@ export interface TimelineClip extends TimelineItemBase {
   kind: "clip";
   id: ClipId;
   range: TimeRange;
+  /** Peak amplitudes at uniform source-time intervals; independent of clip length. */
+  waveform?: readonly number[] | { peaks: readonly number[]; sampleDuration: number };
   color: string;
   /** Media time at the left edge; moving a clip preserves this offset. */
   sourceOffset?: number;
@@ -82,8 +84,6 @@ export interface TimelineClip extends TimelineItemBase {
   /** Full source length in seconds (also the cycle length when looping). */
   sourceDuration?: number;
   loop?: boolean;
-  /** Normalized absolute PCM peaks, evenly spaced across the full source. */
-  waveform?: readonly number[];
 }
 
 export interface TimelineCue extends TimelineItemBase {

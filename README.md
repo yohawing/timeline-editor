@@ -277,3 +277,27 @@ window resize, ancestor transition completion, and color-scheme/forced-colors me
 per animation frame and unchanged palettes do not cause Canvas repaints.
 The demo's own preview and controls use separate `--example-*` variables in
 `example.css`; library styles do not impose colors on the host application's preview.
+
+
+### Host editing compatibility
+
+`editing` accepts either the clip-specific callbacks above or the compact host
+contract `{ onSelect?, onStart?, onCommit }`. The latter proposes a
+`TimelineItemEdit` for clips, cues, markers and event cues; it never mutates host
+data. `selectedItem={{ id, kind }}` controls Canvas selection. Escape, pointer
+cancellation, or a data-source/revision change cancels a pending commit.
+`proposeTimelineItemEdit` is also exported from `/core` for host-side edits.
+
+`sidebar={{ title, content }}` provides the optional toggleable, resizable overlay
+panel. `slots.inspector` provides the host-controlled docked panel used by the
+demo; choose one panel model per instance. `renderRowActions` is supported, with
+`slots.rowActions` taking precedence when supplied.
+
+Waveforms accept either normalized peak arrays (with `sourceDuration`) or
+`{ peaks, sampleDuration }`, where `sampleDuration` is the source-time interval
+per peak. Both Canvas and editable clips honor source offsets and looping.
+
+Set `theme="light"` for the built-in light palette; dark remains the default.
+Changing this prop repaints the existing Canvas without resetting the view.
+Legacy `--timeline-canvas-*` overrides remain supported and take precedence over
+the corresponding shared `--timeline-*` color token for Canvas painting.

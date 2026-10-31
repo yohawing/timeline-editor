@@ -86,7 +86,9 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
     const moving = drag.current?.id === clip.id ? preview : null;
     const start = moving?.start ?? clip.range.start;
     const duration = moving?.end !== undefined ? moving.end - start : clip.range.end - clip.range.start;
-    const sourceDuration = clip.sourceDuration ?? (clip.range.end - clip.range.start);
+    const waveform = clip.waveform;
+    const peaks = waveform && "peaks" in waveform ? waveform.peaks : waveform;
+    const sourceDuration = waveform && "peaks" in waveform ? waveform.sampleDuration * waveform.peaks.length : clip.sourceDuration ?? (clip.range.end - clip.range.start);
     const sourceOffset = (clip.sourceOffset ?? 0) + (moving && drag.current?.mode === "start" ? start - clip.range.start : 0);
     const rows = moving ? dataSource.getRows({ start: 0, count: dataSource.getRowCount() }) : [];
     const index = moving ? rows.findIndex(row => row.id === moving.rowId) : rowIndex;
@@ -94,7 +96,6 @@ export function useClipEditing({ editing, dataSource, viewport, scale, rowHeight
     const left = Math.max(scrollLeft, x);
     const right = Math.min(scrollLeft + width, x + duration * scale);
     const visibleWidth = Math.max(1, right - left);
-    const peaks = clip.waveform;
     const path: string[] = [];
     if (peaks?.length && sourceDuration > 0) {
       // Aggregate all bins represented by a pixel, so narrow transients survive zoom-out.

@@ -457,3 +457,71 @@ it("keeps external transport inside playback bounds while browsing outside the d
   expect(seeks.length).toBeGreaterThan(0);
   for (const seek of seeks) expect(seek.time).toBe(2);
 });
+
+it('opts into item commits and cancels an edit on Escape', () => {
+  const data = source();
+  const item = { kind: 'clip' as const, id: timelineId<'clip'>('edit-clip'), rowId, label: 'Edit me', color: '#fff', range: { start: 0, end: 10 } };
+  data.getItems = () => [item];
+  const onCommit = vi.fn(); const onSelect = vi.fn();
+  render(<TimelineEditor dataSource={data} editing={{onCommit, onSelect}} />);
+  const viewport = screen.getByRole('application', {name:'Timeline scrubber'});
+  const pointer = (type: string, x: number) => { const event=new Event(type,{bubbles:true});Object.assign(event,{button:0,pointerId:1,clientX:x,clientY:10});fireEvent(viewport,event); };
+  pointer('pointerdown',20); pointer('pointermove',40); pointer('pointerup',40);
+  expect(onSelect).toHaveBeenCalledWith(item); expect(onCommit).toHaveBeenCalledOnce();
+  pointer('pointerdown',20);pointer('pointermove',40);fireEvent.keyDown(viewport,{key:'Escape'});pointer('pointerup',40);
+  expect(onCommit).toHaveBeenCalledOnce();
+});
+
+
+it('owns optional sidebar content and restores the layout when omitted', () => {
+  const data = source();
+  const view = render(<TimelineEditor dataSource={data} sidebar={{title: 'Properties', content: <input aria-label="Clip label" defaultValue="hello" />}} />);
+  expect(screen.queryByRole('complementary', {name:'Properties'})).toBeNull();
+  fireEvent.click(screen.getByRole('button', {name:'Toggle Properties'}));
+  const sidebar = screen.getByRole('complementary', {name:'Properties'});
+  expect(sidebar.closest('.timeline-editor')).toBeTruthy();
+  const input = screen.getByRole('textbox', {name:'Clip label'});
+  fireEvent.change(input, {target:{value:'updated'}});
+  expect((input as HTMLInputElement).value).toBe('updated');
+  view.rerender(<TimelineEditor dataSource={data} />);
+  expect(screen.queryByRole('complementary')).toBeNull();
+  expect(document.querySelector('.timeline-editor--with-sidebar')).toBeNull();
+});
+
+
+it("rejects a host edit if its data revision changes during the drag", () => {
+  let revision = 1;
+  const data = source();
+  data.getRevision = () => revision;
+  data.getItems = () => [{ kind: "clip", id: timelineId<"clip">("c"), rowId, label: "clip", color: "red", range: { start: 0, end: 5 } }];
+  const onCommit = vi.fn();
+  const view = render(<TimelineEditor dataSource={data} editing={{ onCommit }} />);
+  const viewport = screen.getByRole("application", { name: "Timeline scrubber" });
+  const pointer = (type: string, x: number) => { const event = new Event(type, { bubbles: true }); Object.assign(event, { button: 0, pointerId: 1, clientX: x, clientY: 10 }); fireEvent(viewport, event); };
+  pointer("pointerdown", 20);
+  pointer("pointermove", 40);
+  revision++;
+  view.rerender(<TimelineEditor dataSource={data} editing={{ onCommit }} />);
+  pointer("pointerup", 40);
+  expect(onCommit).not.toHaveBeenCalled();
+});
+
+it("opens the host sidebar on item double-click and leaves its shortcuts host-owned", () => {
+  const data = source();
+  data.getItems = () => [{ kind: "cue", id: timelineId<"cue">("cue"), rowId, label: "cue", color: "red", time: 1 }];
+  const transport = controller();
+  const onSelect = vi.fn(), onKeyDown = vi.fn();
+  render(<TimelineEditor dataSource={data} playbackController={transport} editing={{ onSelect, onCommit: vi.fn() }}
+    sidebar={{ title: "Properties", content: <div role="slider" tabIndex={0} onKeyDown={onKeyDown} /> }} />);
+  // Default scale is fit to the viewport; use the first hit's exact time at 1s.
+  const viewport = screen.getByRole("application", { name: "Timeline scrubber" });
+  const scale = Number(document.querySelector<HTMLElement>(".timeline-editor__content")?.style.width.replace("px", "")) / 10;
+  fireEvent.doubleClick(viewport, { clientX: scale, clientY: 10 });
+  expect(onSelect).toHaveBeenCalledWith(data.getItems({ rowIds: [rowId], range: { start: 0, end: 10 } })[0]);
+  expect(screen.getByRole("complementary", { name: "Properties" })).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("slider"), { key: " " });
+  expect(onKeyDown).toHaveBeenCalledOnce();
+  expect(transport.dispatch).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Close Properties" }));
+  expect(screen.queryByRole("complementary", { name: "Properties" })).toBeNull();
+});

@@ -46,6 +46,7 @@ function Example(): JSX.Element {
   const preferences = useUiPreferences();
   const panes = usePaneResize(preferences.initial.previewRatio, preferences.saveRatio);
   const params = new URLSearchParams(window.location.search);
+  const [theme, setTheme] = useState<"dark" | "light">(params.get("theme") === "light" ? "light" : "dark");
   const stress = params.get("stress") === "1";
   const variant = params.get("variant") === "compact" ? "compact" : "full";
   const requestedFps = Number(params.get("fps") ?? 24);
@@ -80,6 +81,7 @@ function Example(): JSX.Element {
       </div>
       <div inert={!audio.ready} className="example-editor" onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
         <TimelineEditor
+          theme={theme}
           dataSource={audioData}
           editing={audio.editing}
           eventEditing={audio.eventEditing}
@@ -94,7 +96,7 @@ function Example(): JSX.Element {
           playbackController={audio.controller}
           frameRate={fps}
           variant={variant}
-          slots={{ inspector: audio.properties, toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack, rowActions: audio.rowActions, rowIcon: audio.rowIcon }}
+          slots={{ toolbarEnd: <select aria-label="Theme" title="Theme" value={theme} onChange={event => setTheme(event.target.value as "dark" | "light")}><option value="dark">Dark</option><option value="light">Light</option></select>, inspector: audio.properties, toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack, rowActions: audio.rowActions, rowIcon: audio.rowIcon }}
           onDiagnostic={(diagnostic) => console.warn(diagnostic.message, diagnostic.error)}
           onPerformanceSummary={(summary) => {
             const runtime = globalThis as { __timelinePerf?: unknown; __timelinePerfSamples?: unknown[] };

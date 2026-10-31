@@ -6,6 +6,14 @@ export interface SavedProject {
   audio: [string, Blob][];
 }
 
+function validWaveform(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (Array.isArray(value)) return value.every(Number.isFinite);
+  if (!value || typeof value !== "object" || !("peaks" in value) || !("sampleDuration" in value)) return false;
+  return Array.isArray(value.peaks) && value.peaks.every(Number.isFinite)
+    && typeof value.sampleDuration === "number" && Number.isFinite(value.sampleDuration) && value.sampleDuration > 0;
+}
+
 function validProject(value: SavedProject): boolean {
   if (value.version !== 1 || !Array.isArray(value.document?.tracks) || !Array.isArray(value.document?.clips) || !Array.isArray(value.audio)) return false;
   const { tracks, clips } = value.document;
@@ -31,7 +39,7 @@ function validProject(value: SavedProject): boolean {
     && (clip.volume === undefined || (Number.isFinite(clip.volume) && clip.volume >= 0 && clip.volume <= 2))
     && (clip.sourceOffset === undefined || (Number.isFinite(clip.sourceOffset) && clip.sourceOffset >= 0))
     && (clip.sourceDuration === undefined || (Number.isFinite(clip.sourceDuration) && clip.sourceDuration > 0))
-    && (clip.waveform === undefined || (Array.isArray(clip.waveform) && clip.waveform.every(Number.isFinite))))) return false;
+    && validWaveform(clip.waveform))) return false;
   if (!value.audio.every(entry => Array.isArray(entry) && typeof entry[0] === "string" && entry[1] instanceof Blob)) return false;
   const audioIds = new Set(value.audio.map(([id]) => id));
   const audioClips = clips.filter(clip => tracks.find(track => track.id === clip.rowId)?.type === "audio");

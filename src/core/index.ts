@@ -4,3 +4,4 @@ export * from "./layout";
 export * from "./playback";
 export * from "./fixture";
 export * from "./viewRange";
+export * from "./editing";

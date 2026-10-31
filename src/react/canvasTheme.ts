@@ -1,6 +1,6 @@
 import { useLayoutEffect, useState, type RefObject } from "react";
 
-const tokens = ["row-divider", "row-group", "row-even", "row-odd", "grid-major", "grid-frame", "grid-minor", "selection", "clip-border", "clip-text", "clip-loop-line", "cue-label", "key", "key-selected", "key-border", "key-column"] as const;
+const tokens = ["row-divider", "row-group", "row-even", "row-odd", "grid-major", "grid-frame", "grid-minor", "selection", "clip-border", "clip-text", "clip-loop-line", "cue-label", "key", "key-selected", "key-border", "key-column", "waveform", "clip-text-dark"] as const;
 export type CanvasColors = Record<typeof tokens[number], string>;
 
 /** CSS owns the palette. Observe theme inputs, not animated Canvas/clip descendants. */
@@ -12,7 +12,10 @@ export function useCanvasTheme(root: RefObject<HTMLElement | null>): CanvasColor
     if (!element || !view) return;
     const read = () => {
       const style = view.getComputedStyle(element);
-      const next = Object.fromEntries(tokens.map(token => [token, style.getPropertyValue(`--timeline-${token}`).trim() || style.color])) as CanvasColors;
+      const legacyNames: Partial<Record<typeof tokens[number], string>> = { "row-group": "group", "cue-label": "label", "key-column": "column" };
+      const next = Object.fromEntries(tokens.map(token => [token,
+        style.getPropertyValue(`--timeline-canvas-${legacyNames[token] ?? token}`).trim() ||
+        style.getPropertyValue(`--timeline-${token}`).trim() || style.color])) as CanvasColors;
       setColors(previous => previous && tokens.every(token => previous[token] === next[token]) ? previous : next);
     };
     let frame: number | null = null;

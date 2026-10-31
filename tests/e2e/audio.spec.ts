@@ -1,4 +1,4 @@
-import { setPlaybackEdge } from "./playback-helpers";
+import { setPlaybackEdge, waitForTimelineLayout } from "./playback-helpers";
 import { expect, test, type Page } from "@playwright/test";
 
 async function drop(page: Page, time: number, row = 0, name = "dropped.wav", invalid = false, previewOnly = false) {
@@ -237,6 +237,7 @@ test("track divider resizes and row plus adds clips at the playhead", async ({ p
   await drop(page, 2, 0, "resized.wav");
   await expect(page.getByRole("button", { name: "Clip resized.wav" })).toHaveAttribute("data-start", "2");
   await divider.press("Home"); await expect.poll(width).toBe(initial);
+  await waitForTimelineLayout(page);
   const ruler = (await page.locator(".timeline-editor__ruler").boundingBox())!;
   await page.mouse.click(ruler.x + ruler.width * 3 / Number(await page.locator(".timeline-editor").getAttribute("data-view-end")), ruler.y + 3);
   await page.getByRole("button", { name: "Add clip to Root Motion", exact: true }).click();
