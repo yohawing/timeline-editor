@@ -43,7 +43,9 @@ for (const frames of [120, 10000, 100000, 600000]) {
       await page.addStyleTag({ content: ".timeline-editor__tick { font-size: 18px !important; }" });
       await expect.poll(() => page.locator(".timeline-editor__tick--measure").evaluate(element => getComputedStyle(element).fontSize)).toBe("18px");
       await inspectLabels(page);
-      await page.getByRole("button", { name: "Toggle time display" }).click();
+      await page.getByLabel("Timeline settings").click();
+  await page.getByLabel("Time display", { exact: true }).selectOption((await page.getByLabel("Time display", { exact: true }).inputValue()) === "frames" ? "seconds" : "frames");
+  await page.getByLabel("Timeline settings").click();
       await inspectLabels(page, "seconds");
     });
   }

@@ -26,17 +26,17 @@ Dragging on the ruler or the track area scrubs **live**: every pointer sample di
 
 ### View range, zoom and wheel
 
-The track viewport has no zoom slider and no native horizontal scrollbar. A **view range bar** under the tracks (UE Sequencer style) shows the whole clip as the bar and the visible window as a thumb: drag the thumb to pan, drag either end to zoom that side, click the empty bar to centre the view there, double-click to fit the whole clip. The view fits the whole clip whenever the data source's range changes. Wheel zoom-out and dragging either bar edge can extend the view before or after the data. Dragging a full-width thumb right reveals earlier time (left reveals later time); a smaller thumb pans normally. Home or double-clicking the bar fits the data again. Browsing bounds are UI state (`viewExtent`), separate from the playback range.
+The track viewport has no zoom slider and no native horizontal scrollbar. A **view range bar** under the tracks (UE Sequencer style) shows the whole clip as the bar and the visible window as a thumb: drag the thumb to pan, drag either end to zoom that side, click the empty bar to centre the view there, double-click to fit the whole clip. The view fits the whole clip whenever the data source's range changes. Wheel zoom-out and dragging either bar edge can extend the view before or after the data. Dragging a full-width thumb right reveals earlier time (left reveals later time); a smaller thumb pans normally. Default/UE Home (Unity A) or double-clicking the bar fits the data again. Browsing bounds are UI state (`viewExtent`), separate from the playback range.
 
-Wheel over the ruler or the tracks: **wheel** zooms the time axis around the pointer (wheel up = zoom in), **Shift+wheel** (or a trackpad's horizontal delta) pans, **Ctrl+wheel** zooms the row height (`--timeline-row-zoom`, 0.6×–3×). Zoomed in far enough (≥ 6px per frame) the track grid switches to one line per frame and the ruler labels frames; `timelineGridSteps` in `core/viewRange.ts` decides the steps. The zoom math lives in `core/viewRange.ts` and is exported from `@yohawing/timeline-editor/core`.
+In the Default preset, **wheel** zooms time around the pointer, **Ctrl+wheel** changes row height, **Shift+wheel** pans horizontally, and **middle drag** pans both axes. Other presets are listed under Operation presets below. Row zoom uses `--timeline-row-zoom` (0.6x-3x). Zoomed in far enough (≥ 6px per frame) the track grid switches to one line per frame and the ruler labels frames; `timelineGridSteps` in `core/viewRange.ts` decides the steps. The zoom math lives in `core/viewRange.ts` and is exported from `@yohawing/timeline-editor/core`.
 
 ### Frame-rate picker
 
-`frameRateOptions` (`{ value: string; label: string }[]`) turns the toolbar's read-only "N fps" label into a `<select>`; `frameRateValue` names the current choice and `onFrameRateChange(value)` reports a pick. Values are opaque strings so a host can offer an "auto" entry next to numbers; `frameRate` remains the number used for display and frame snapping.
+`frameRateOptions` (`{ value: string; label: string }[]`) turns the settings menu's read-only "N fps" label into a `<select>`; `frameRateValue` names the current choice and `onFrameRateChange(value)` reports a pick. Values are opaque strings so a host can offer an "auto" entry next to numbers; `frameRate` remains the number used for display and frame snapping.
 
 ### Playback rate
 
-`TimelinePlaybackSnapshot.rate` is an optional multiplier applied to elapsed time (`1` = normal speed). `TimelinePlaybackCommand` accepts a matching `setRate` command. Both are additive and backward compatible: a controller that never reports `rate` is treated as fixed at `1x` by `projectTimelinePlaybackTime` and by the transport UI, and dispatching `setRate` to a controller that ignores it is a no-op. `createLocalPlaybackController` implements `rate`, defaulting to `1` and scaling its internal timer's elapsed time by the current rate. The transport UI always renders a rate control (next to Loop) that cycles `0.25x / 0.5x / 1x / 2x` on click and displays `1x` whenever the active snapshot omits `rate`; the control is not hidden for legacy controllers, since dispatch failures are already swallowed and reported through `onDiagnostic`.
+`TimelinePlaybackSnapshot.rate` is an optional multiplier applied to elapsed time (`1` = normal speed). `TimelinePlaybackCommand` accepts a matching `setRate` command. Both are additive and backward compatible: a controller that never reports `rate` is treated as fixed at `1x` by `projectTimelinePlaybackTime` and by the transport UI, and dispatching `setRate` to a controller that ignores it is a no-op. `createLocalPlaybackController` implements `rate`, defaulting to `1` and scaling its internal timer's elapsed time by the current rate. The transport UI always renders a rate control (next to Loop) that opens numeric input on click and displays `1x` whenever the active snapshot omits `rate`; the control is not hidden for legacy controllers, since dispatch failures are already swallowed and reported through `onDiagnostic`.
 
 ## v0 boundaries
 
@@ -301,3 +301,63 @@ Set `theme="light"` for the built-in light palette; dark remains the default.
 Changing this prop repaints the existing Canvas without resetting the view.
 Legacy `--timeline-canvas-*` overrides remain supported and take precedence over
 the corresponding shared `--timeline-*` color token for Canvas painting.
+
+Hosts can set `allowViewOutsideRange={false}` to bound time-axis zoom and pan to `dataSource.getRange()`, while keeping loop In/Out independently editable. The default remains unrestricted browsing.
+
+### Timeline settings and numeric navigation
+
+Open the gear button for frame/second display, FPS, playback start/end, and playback speed. FPS choices and range edits use the existing host callbacks (`onFrameRateChange`, `onChangePlaybackRange`); unavailable controls stay disabled. Range input commits with Enter, snaps to a frame, and preserves at least one frame between start and end.
+
+`slots.settings` accepts host-owned settings content; the demo places Dark/Light selection here. The toolbar defaults to 36px with 28px controls, and scrollable panels share compact scrollbars. Settings uses Google Material Symbols; Snap uses the Lucide outline magnet (ISC, notice included in LICENSE).
+
+The Snap icon highlights when enabled. It controls pointer scrubbing, clip/event edits, playback-range handles and loop-range dragging; Alt temporarily bypasses snapping. Explicit frame-step and numeric-navigation commands retain frame snapping. `proposeTimelineItemEdit` also accepts an optional final `snap` argument (default `true`).
+
+Click the current-time readout (or focus it and press Enter/F2) to enter a frame number or seconds in the selected display mode. Enter seeks through the existing playback controller, with frame snapping and playback-range clamping. Escape or leaving the field cancels the edit. A controller-free timeline updates its local playhead.
+
+### Operation presets
+
+The gear menu offers Default (original application controls), UE, Unity, and Maya inspired transport and navigation presets. Set `initialViewState.keyboardPreset` to `"default" | "ue" | "unity" | "maya"`; `onViewStateChange` reports changes for host persistence. The existing saved field name is retained for compatibility. Missing, unknown, or removed `"logic"` values fall back to `"default"`; explicitly saved UE/Unity/Maya selections are preserved. Transport tooltips reflect the selected keys; editing shortcuts and host inputs keep their existing ownership.
+
+| Preset | Play / pause | Previous / next frame | Other transport keys |
+| --- | --- | --- | --- |
+| Default | Space | Left / Right | Down: play, K: pause, Up / Ctrl+Up: start / end |
+| UE | Space | Left / Right | Down: play, K: pause, Up / Ctrl+Up: start / end |
+| Unity | Space | comma / period | — |
+| Maya | Alt+V | Alt+comma / Alt+period | Alt+Shift+V: start |
+
+Default/UE Home and Unity A fit the timeline. Maya Home remains a library extension for fitting. Transport references: [UE playback options](https://dev.epicgames.com/documentation/en-us/unreal-engine/sequencer-cinematic-toolbar-in-unreal-engine), [Unity playback controls](https://docs.unity3d.com/Packages/com.unity.timeline@1.8/manual/tl-play-ctrls.html), [Maya shortcuts](https://www.autodesk.com/shortcuts/maya).
+
+| Preset | Wheel | Modified wheel | Pan drag |
+| --- | --- | --- | --- |
+| Default | Time zoom | Ctrl: row zoom; Shift: horizontal pan | Middle |
+| UE | Vertical scroll | Ctrl: time zoom; Shift: horizontal pan | Right; Alt+Shift+right: time zoom |
+| Unity | Time zoom | Control (macOS Command): row zoom | Middle or Alt+left |
+| Maya | Time zoom (library extension) | No Ctrl row zoom | Alt+middle; Alt+right: time zoom |
+
+Horizontal trackpad input and Shift+wheel pan horizontally as common library extensions. Alt is Option on macOS. Unity uses Command for row zoom on macOS; Default retains Ctrl on all platforms. UE uses `-` for zoom in and `=` for zoom out, as documented by Epic; Unity uses the opposite mapping. Default/UE Shift+S toggles auto scroll. Unity's Alt+left gesture takes priority over starting a clip edit; Alt pressed after an edit begins still bypasses snapping. Pan/drag-zoom cancellation with Escape or pointer cancellation restores the original visible view. Zoom centers on the pointer. Drag sensitivity and row-height scaling are library-specific.
+
+Navigation references (checked 2026-10-31): [UE Sequencer hotkeys](https://dev.epicgames.com/documentation/unreal-engine/sequencer-hotkeys-in-unreal-engine?lang=en-US), [Unity Timeline](https://docs.unity3d.com/Packages/com.unity.timeline@1.8/manual/clip-pan-zoom.html), [Maya Dope Sheet](https://help.autodesk.com/cloudhelp/2026/ENU/Maya-Animation/files/GUID-FCE19FDD-F428-4E75-8E32-E148E495CB70.htm). Maya wheel zoom is retained as a library extension because the referenced official page does not establish it. Unsupported native actions are left unbound: UE middle-click key creation, Unity F frame-selection, and Maya rectangular zoom. These presets cover transport and view navigation, not application-specific editing tools.
+
+Time display is a Frames/Seconds dropdown. With `onFrameRateChange` and no `frameRateOptions`, Frame rate is a free numeric field accepting finite positive values such as 29.97. Enter or blur commits; Escape cancels; invalid values reset. Existing hosts supplying `frameRateOptions` retain their named-choice picker. Speed and the toolbar rate control accept any finite positive multiplier. Enter or blur commits; Escape cancels; empty, zero, negative, and non-finite values reset. The host remains authoritative for accepted rates.
+
+Loop OFF hides the loop lane and interval overlay without changing the saved interval. Loop ON restores them. Playback start/end handles remain available independently of looping.
+
+### Playback auto scroll
+
+Enable **Auto scroll** in settings to keep the playhead visible during playback. When it leaves the visible time range, the view advances with the playhead near its left side; loop wrap follows back to the start. Zoom and vertical scroll are preserved. Paused seeks do not move the view. The default is off.
+
+Hosts can initialize `initialViewState.autoScroll`; changes are reported through `onViewStateChange` with other view preferences. The demo persists the choice. Browsing limits still follow `allowViewOutsideRange`, and playback range/data remain host-owned.
+
+### Shortcut focus scope
+
+The standalone demo enables transport and view shortcuts across the document, so playback and frame stepping work on initial load and with the preview focused. Playback toolbar buttons also allow these shortcuts; Enter still activates the focused button. Numeric/text inputs, settings, inspectors, editable content and host controls keep their own keyboard behavior. Editing shortcuts (delete, undo, clip nudges) remain local to the timeline.
+
+The reusable component defaults to `shortcutScope="editor"`. A single-editor host can opt into `shortcutScope="document"`; it does not steal focus or forward keys to another DOM element. Already-handled and IME composition events are ignored, and focused timeline instances handle their own keys. Hosts with multiple editors should keep editor scope or enable document scope only on the active editor.
+
+### Demo reset controls
+
+**Reset UI settings** in settings restores the default operation preset, time display, 24 FPS, dark theme, zoom, snapping, auto scroll, pane sizes and expanded groups. It keeps the current project, imported audio and Undo/Redo history; no reload is needed.
+
+**Reset project** in the header confirms before replacing the current demo project with its initial tracks and clips. Display preferences are retained. Reset is saved through the normal project persistence path, pending audio imports are invalidated, and Undo can restore the previous project until the page is closed. The normal and stress projects remain separate.
+
+Demo track colors distinguish Animation (blue) from Group (neutral gray); Audio stays teal and Event stays amber. Hosts continue to own their row and clip colors.

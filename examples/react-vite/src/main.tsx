@@ -44,13 +44,14 @@ function createPreviewTimeline(): TimelineDataSource {
 
 function Example(): JSX.Element {
   const preferences = useUiPreferences();
+  const [viewRevision, setViewRevision] = useState(0);
   const panes = usePaneResize(preferences.initial.previewRatio, preferences.saveRatio);
   const params = new URLSearchParams(window.location.search);
   const [theme, setTheme] = useState<"dark" | "light">(params.get("theme") === "light" ? "light" : "dark");
   const stress = params.get("stress") === "1";
   const variant = params.get("variant") === "compact" ? "compact" : "full";
   const requestedFps = Number(params.get("fps") ?? 24);
-  const fps = Number.isFinite(requestedFps) && requestedFps > 0 ? requestedFps : 24;
+  const [fps, setFps] = useState(Number.isFinite(requestedFps) && requestedFps > 0 ? requestedFps : 24);
   const [displayMode, setDisplayMode] = useState<"frames" | "seconds">(preferences.initial.timeline?.displayMode === "seconds" ? "seconds" : "frames");
   const onViewStateChange = useCallback((state: TimelineViewState) => {
     setDisplayMode(state.displayMode);
@@ -73,19 +74,26 @@ function Example(): JSX.Element {
   const audio = useAudioDemo(playbackController, motion, { displayMode, fps });
   useEffect(() => { if (audio.ready) document.querySelector<HTMLElement>(".timeline-editor__viewport")?.focus({ preventScroll: true }); }, [audio.ready]);
   const audioData = useMemo(() => withAudioRows(dataSource, audio.document, audio.collapsed), [dataSource, audio.document, audio.collapsed]);
+  const resetUiSettings = () => {
+    preferences.reset(); panes.reset(); audio.resetView();
+    setTheme("dark"); setFps(24); setDisplayMode("frames");
+    setViewRevision(value => value + 1);
+  };
   return (
     <main data-project-state={!audio.ready ? "loading" : audio.saving ? "saving" : "ready"} ref={panes.shell} style={panes.style} className="example-shell">
       {panes.divider}
-      <div className="example-preview" onPointerDown={() => document.querySelector<HTMLElement>(".timeline-editor__viewport")?.focus()}>
+      <div className="example-preview" tabIndex={-1} onPointerDown={event => event.currentTarget.focus()}>
         <canvas ref={audio.preview} aria-label="Animation preview" />
       </div>
       <div inert={!audio.ready} className="example-editor" onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()}>
         <TimelineEditor
+          key={viewRevision}
+          shortcutScope="document"
           theme={theme}
           dataSource={audioData}
           editing={audio.editing}
           eventEditing={audio.eventEditing}
-          initialViewState={preferences.initial.timeline}
+          initialViewState={viewRevision === 0 ? preferences.initial.timeline : undefined}
           onViewStateChange={onViewStateChange}
           onChangePlaybackRange={audio.changePlaybackRange}
           onRenameRow={stress ? undefined : audio.renameRow}
@@ -95,8 +103,9 @@ function Example(): JSX.Element {
           showTitle={false}
           playbackController={audio.controller}
           frameRate={fps}
+          onFrameRateChange={value => setFps(Number(value))}
           variant={variant}
-          slots={{ toolbarEnd: <select aria-label="Theme" title="Theme" value={theme} onChange={event => setTheme(event.target.value as "dark" | "light")}><option value="dark">Dark</option><option value="light">Light</option></select>, inspector: audio.properties, toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack, rowActions: audio.rowActions, rowIcon: audio.rowIcon }}
+          slots={{ settings: <><label>Theme<select aria-label="Theme" title="Theme" value={theme} onChange={event => setTheme(event.target.value as "dark" | "light")}><option value="dark">Dark</option><option value="light">Light</option></select></label><button className="example-reset-settings" title="Reset display and operation settings; keep project and undo history" onClick={resetUiSettings}>Reset UI settings</button></>, inspector: audio.properties, toolbarStart: audio.toolbar, tracksHeaderEnd: audio.addTrack, rowActions: audio.rowActions, rowIcon: audio.rowIcon }}
           onDiagnostic={(diagnostic) => console.warn(diagnostic.message, diagnostic.error)}
           onPerformanceSummary={(summary) => {
             const runtime = globalThis as { __timelinePerf?: unknown; __timelinePerfSamples?: unknown[] };

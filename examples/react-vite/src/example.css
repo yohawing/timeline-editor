@@ -64,3 +64,9 @@ body { background: var(--example-page-bg); color: var(--example-text); font: 13p
 .example-editor .timeline-editor__row-actions { display: grid; grid-template-columns: repeat(3, 20px); gap: 4px; align-items: center; }
 .example-editor .timeline-editor__row-actions .example-add-track { grid-column: 3; width: 20px; height: 20px; }
 .example-track-action svg { display: block; flex: none; }
+
+.example-reset-project, .example-reset-settings { color: var(--timeline-text-muted); background: transparent; border: 1px solid var(--timeline-divider); border-radius: 3px; padding: 4px 8px; font: inherit; cursor: pointer; }
+.example-reset-project { font-size: 11px; white-space: nowrap; }
+.example-reset-settings { font-size: 11px; min-height: 28px; margin-top: 4px; }
+.example-reset-project:hover:not(:disabled), .example-reset-settings:hover { color: var(--timeline-text-bright); background: var(--timeline-control-hover); }
+.example-reset-project:disabled { opacity: .4; cursor: default; }

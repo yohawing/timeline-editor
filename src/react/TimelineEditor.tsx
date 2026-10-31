@@ -1,3 +1,6 @@
+import { PlaybackRateInput } from "./PlaybackRateInput";
+import { wheelAction, keyboardAction, keyboardPresets, normalizeKeyboardPreset, type TimelineKeyboardPreset } from "./keyboardPresets";
+export type { TimelineKeyboardPreset } from "./keyboardPresets";
 import {
   useCallback,
   useId,
@@ -40,6 +43,7 @@ import {
 } from "../core/layout";
 import {
   clampPixelsPerSecond,
+  clampScrollLeft,
   clampRowZoom,
   fitPixelsPerSecond,
   panViewByFraction,
@@ -65,7 +69,7 @@ import {
 } from "../core/playback";
 import "../styles/timeline.css";
 import { PlaybackRangeHandles } from "./PlaybackRangeHandles";
-import { useMiddlePan } from "./useMiddlePan";
+import { usePointerNavigation } from "./usePointerNavigation";
 import { RowLabel } from "./RowLabel";
 import { TrackDivider } from "./TrackDivider";
 import { useCanvasTheme, type CanvasColors } from "./canvasTheme";
@@ -79,6 +83,8 @@ import {
   PauseIcon,
   PlayIcon,
   RepeatIcon,
+  SettingsIcon,
+  SnapIcon,
   SkipNextIcon,
   SkipPreviousIcon,
 } from "./icons";
@@ -109,11 +115,17 @@ export interface TimelineEditorSlots {
   rowIcon?: (row: TimelineRow) => ReactNode;
   toolbarStart?: ReactNode;
   toolbarEnd?: ReactNode;
+  /** Host-owned settings (for example theme selection) inside the settings panel. */
+  settings?: ReactNode;
   emptyState?: ReactNode;
   diagnosticAction?: ReactNode;
 }
 
 export interface TimelineViewState {
+  /** Follow the playhead during playback; defaults to false. */
+  autoScroll?: boolean;
+  /** Transport and navigation preset; omitted in older saved preferences. */
+  keyboardPreset?: TimelineKeyboardPreset;
   /** Expanded browsing bounds, separate from project/playback data. */
   viewExtent?: TimeRange | null;
   treeWidth: number | null;
@@ -130,6 +142,10 @@ export interface TimelineHostEditing {
 }
 
 export interface TimelineEditorProps {
+  /** Opt in to document-wide transport/view shortcuts. Editing shortcuts remain local.
+   * Use document scope for a single-editor application; default is editor scope.
+   */
+  shortcutScope?: "editor" | "document";
   /** Compatible host-owned item editing and optional overlay inspector. */
   sidebar?: { title: string; content: ReactNode };
   selectedItem?: { id: string; kind: TimelineItem["kind"] };
@@ -139,6 +155,8 @@ export interface TimelineEditorProps {
   onChangePlaybackRange?: (range: TimeRange) => void;
   /** Initial view preferences; persistence remains owned by the host. */
   initialViewState?: Partial<TimelineViewState>;
+  /** Allow zoom/pan beyond the data range. Defaults to true. */
+  allowViewOutsideRange?: boolean;
   onViewStateChange?: (state: TimelineViewState) => void;
   dataSource: TimelineDataSource;
   editing?: TimelineEditing | TimelineHostEditing;
@@ -159,12 +177,12 @@ export interface TimelineEditorProps {
    */
   showTitle?: boolean;
   /**
-   * Frame-rate picker in the toolbar, replacing the read-only "N fps" label.
+   * Frame-rate picker in timeline settings, replacing the read-only "N fps" label.
    * Fully controlled: the host lists the choices, names the current one
    * (`frameRateValue`) and receives the pick. Values are opaque strings so a
    * host can offer entries like "auto" next to numbers; `frameRate` itself
    * stays the number used for display/snapping. Omit `frameRateOptions` to
-   * keep the read-only label.
+   * use numeric input when onFrameRateChange is provided, otherwise a read-only label.
    */
   frameRateOptions?: ReadonlyArray<{ value: string; label: string }>;
   frameRateValue?: string;
@@ -189,12 +207,8 @@ const EMPTY_PLAYBACK: TimelinePlaybackSnapshot = {
   loopRange: null,
 };
 
-const TIMELINE_RATE_STEPS = [0.25, 0.5, 1, 2] as const;
-
-function nextTimelineRate(rate: number): number {
-  const index = TIMELINE_RATE_STEPS.indexOf(rate as (typeof TIMELINE_RATE_STEPS)[number]);
-  const fallback = TIMELINE_RATE_STEPS.indexOf(1);
-  return TIMELINE_RATE_STEPS[(index === -1 ? fallback : index + 1) % TIMELINE_RATE_STEPS.length];
+function isShortcutInput(target: HTMLElement): boolean {
+  return target.isContentEditable || Boolean(target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox], [role=combobox], [role=slider], [role=spinbutton]"));
 }
 
 function formatTimelineRate(rate: number): string {
@@ -494,6 +508,7 @@ function dispatchSafely(
 
 export function TimelineEditor({
   dataSource,
+  shortcutScope = "editor",
   editing: editingOptions,
   sidebar,
   selectedItem,
@@ -506,6 +521,7 @@ export function TimelineEditor({
   onReorderRow,
   onToggleRow,
   initialViewState,
+  allowViewOutsideRange = true,
   onViewStateChange,
   playbackController,
   frameRate = 24,
@@ -530,7 +546,7 @@ export function TimelineEditor({
     const available = element.closest(".timeline-editor")!.getBoundingClientRect().width;
     setSidebarWidth(Math.max(Math.min(180, available), Math.min(available, width)));
   };
-  const editDrag = useRef<{ pointer: number; x: number; item: TimelineItem; mode: TimelineEditMode; revision: number; source: TimelineDataSource } | null>(null);
+  const editDrag = useRef<{ pointer: number; x: number; item: TimelineItem; mode: TimelineEditMode; revision: number; source: TimelineDataSource; preview?: TimelineItemEdit } | null>(null);
   const [editPreview, setEditPreview] = useState<TimelineItemEdit | null>(null);
   const fps = normalizeFrameRate(frameRate);
   const revision = useSyncExternalStore(
@@ -570,12 +586,17 @@ export function TimelineEditor({
   );
   const dataRange = useMemo(() => safeRange(dataSource), [dataSource, revision]);
   const [viewExtent, setViewExtent] = useState<TimeRange | null>(() => isFiniteTimeRange(initialViewState?.viewExtent) && initialViewState!.viewExtent!.end > initialViewState!.viewExtent!.start ? initialViewState!.viewExtent! : null);
-  const range = useMemo(() => ({ start: Math.min(dataRange.start, viewExtent?.start ?? dataRange.start), end: Math.max(dataRange.end, viewExtent?.end ?? dataRange.end) }), [dataRange.start, dataRange.end, viewExtent]);
+  const range = useMemo(() => allowViewOutsideRange ? ({ start: Math.min(dataRange.start, viewExtent?.start ?? dataRange.start), end: Math.max(dataRange.end, viewExtent?.end ?? dataRange.end) }) : dataRange, [dataRange, viewExtent, allowViewOutsideRange]);
   const rangeRef = useRef(range);
   rangeRef.current = range;
   const duration = Math.max(0, range.end - range.start);
   const [playbackRangePreview, setPlaybackRangePreview] = useState<TimeRange | null>(null);
   const playbackRange = playbackSnapshot.available ? (playbackSnapshot.range ?? dataRange) : dataRange;
+  const [keyboardPreset, setKeyboardPreset] = useState(() => normalizeKeyboardPreset(initialViewState?.keyboardPreset));
+  const shortcutTitle = (label: string, action: keyof typeof keyboardPresets.ue.keys) => {
+    const key = keyboardPresets[keyboardPreset].keys[action];
+    return key ? `${label} (${key})` : label;
+  };
   const [displayMode, setDisplayMode] = useState<"frames" | "seconds">(initialViewState?.displayMode === "seconds" || initialViewState?.displayMode === "frames" ? initialViewState.displayMode : initialDisplayMode);
   const [scroll, setScroll] = useState({ left: 0, top: 0 });
   const [viewport, setViewport] = useState<CanvasViewport>({ width: 0, height: 0 });
@@ -589,7 +610,7 @@ export function TimelineEditor({
   const [zoomPixelsPerSecond, setZoomPixelsPerSecond] = useState<number | null>(() => Number.isFinite(initialViewState?.pixelsPerSecond) && initialViewState!.pixelsPerSecond! > 0 ? initialViewState!.pixelsPerSecond! : null);
   const pixelsPerSecond = zoomPixelsPerSecond === null
     ? fitPixelsPerSecond(duration, viewport.width)
-    : clampPixelsPerSecond(zoomPixelsPerSecond, duration, viewport.width, true);
+    : clampPixelsPerSecond(zoomPixelsPerSecond, duration, viewport.width, allowViewOutsideRange);
   /**
    * Vertical zoom (Ctrl+wheel): a multiplier on `--timeline-row-height`,
    * applied as `--timeline-row-zoom` on the root element. The row-height
@@ -597,11 +618,12 @@ export function TimelineEditor({
    * strip follow it with no further plumbing.
    */
   const [treeWidth, setTreeWidth] = useState<number | null>(() => Number.isFinite(initialViewState?.treeWidth) && initialViewState!.treeWidth! >= 120 ? initialViewState!.treeWidth! : null);
+  const [autoScroll, setAutoScroll] = useState(initialViewState?.autoScroll === true);
   const [snap, setSnap] = useState(initialViewState?.snap !== false);
   const [rowZoom, setRowZoom] = useState(() => clampRowZoom(initialViewState?.rowZoom ?? 1));
   const viewStateCallback = useRef(onViewStateChange);
   useEffect(() => { viewStateCallback.current = onViewStateChange; }, [onViewStateChange]);
-  useEffect(() => { viewStateCallback.current?.({ treeWidth, pixelsPerSecond: zoomPixelsPerSecond, rowZoom, snap, displayMode, viewExtent }); }, [treeWidth, zoomPixelsPerSecond, rowZoom, snap, displayMode, viewExtent]);
+  useEffect(() => { viewStateCallback.current?.({ treeWidth, pixelsPerSecond: zoomPixelsPerSecond, rowZoom, snap, displayMode, viewExtent, keyboardPreset, autoScroll }); }, [treeWidth, zoomPixelsPerSecond, rowZoom, snap, displayMode, viewExtent, keyboardPreset, autoScroll]);
   // A scrollLeft to apply after the next commit — set together with a zoom
   // change so the browser clamps it against the NEW content width, not the
   // one still in the DOM at event time.
@@ -627,13 +649,30 @@ export function TimelineEditor({
   const loopPointerIdRef = useRef<number | null>(null);
   const loopDragOriginRef = useRef(range.start);
   const timelineViewportRef = useRef<HTMLDivElement>(null);
-  const panHandlers = useMiddlePan(timelineViewportRef);
+  const [editingRate, setEditingRate] = useState(false);
   const treeViewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rootRef = useRef<HTMLElement>(null);
   const colors = useCanvasTheme(rootRef);
   const playheadRef = useRef<HTMLDivElement>(null);
   const readoutRef = useRef<HTMLButtonElement>(null);
+  const settingsRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const closeOutside = (event: Event) => {
+      const settings = settingsRef.current;
+      if (settings?.open && event.target instanceof Node && !settings.contains(event.target)) settings.open = false;
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("focusin", closeOutside);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("focusin", closeOutside);
+    };
+  }, []);
+  const [timeDraft, setTimeDraft] = useState<string | null>(null);
+  const timeInputRef = useRef<HTMLInputElement>(null);
+  const editingTime = timeDraft !== null;
+  useEffect(() => { if (editingTime) { timeInputRef.current?.focus(); timeInputRef.current?.select(); } }, [editingTime]);
   const rowHeightProbeRef = useRef<HTMLDivElement>(null);
   const tickWidthProbeRef = useRef<HTMLSpanElement>(null);
   const [selectedTarget, setSelectedTarget] = useState<TimelinePlaybackTarget | null>(null);
@@ -670,9 +709,12 @@ export function TimelineEditor({
     pendingViewRef.current = null;
     const pending = pendingScrollLeftRef.current;
     const element = timelineViewportRef.current;
-    if (pending === null || !element) return;
+    if (!element) return;
     pendingScrollLeftRef.current = null;
-    element.scrollLeft = pending;
+    const left = allowViewOutsideRange ? pending : clampScrollLeft(pending ?? element.scrollLeft, duration, pixelsPerSecond, viewport.width);
+    if (left === null) return;
+    element.scrollLeft = left;
+    if (!allowViewOutsideRange) setScroll((current) => current.left === left ? current : { ...current, left });
   });
 
   useEffect(() => {
@@ -755,6 +797,9 @@ export function TimelineEditor({
   const clipEditing = useClipEditing({ editing, dataSource, viewport: timelineViewportRef, scale: pixelsPerSecond, rowHeight, range, fps, displayMode, snap, scrollLeft: scroll.left, width: viewport.width });
   const editableClips = editing ? dataSource.getItems(visibleQuery).filter(item => item.kind === "clip" && editing.canEditClip(item)) : [];
   const commandTarget = resolveTimelinePlaybackTarget(selectedTarget, playbackSnapshot);
+  useEffect(() => {
+    if (!canTransport || !playbackSnapshot.looping) { loopPointerIdRef.current = null; setLoopDragPreview(null); }
+  }, [canTransport, playbackSnapshot.looping]);
   const loopRange = canTransport ? (playbackSnapshot.loopRange ?? null) : localLoopRange;
 
   const updateReadout = useCallback((nextTime: number) => {
@@ -773,24 +818,13 @@ export function TimelineEditor({
 
   useEffect(() => updatePlayhead(time), [time, updatePlayhead]);
 
-  useEffect(() => {
-    if (!playbackController || !playbackSnapshot.available || !playbackSnapshot.playing || typeof requestAnimationFrame === "undefined") return;
-    let frame = 0;
-    const tick = () => {
-      updatePlayhead(projectTimelinePlaybackTime(playbackSnapshot));
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [playbackController, playbackSnapshot, updatePlayhead]);
-
-  const seekFromClientX = useCallback((clientX: number) => {
+  const seekFromClientX = useCallback((clientX: number, bypass = false) => {
     const element = timelineViewportRef.current;
     if (!element) return;
     const next = resolveTimelineSeekTime(
       range.start + (clientX - element.getBoundingClientRect().left + element.scrollLeft) / pixelsPerSecond,
       playbackRange,
-      "frame-snap",
+      snap && !bypass ? "frame-snap" : "unsnapped",
       fps,
     );
     scrubPreviewRef.current = next;
@@ -802,7 +836,7 @@ export function TimelineEditor({
     if (playbackController && playbackSnapshot.available) {
       dispatchSafely(playbackController, { type: "seek", time: next, target: commandTarget }, onDiagnostic);
     }
-  }, [commandTarget, fps, onDiagnostic, pixelsPerSecond, playbackController, playbackSnapshot.available, range.start, playbackRange, updatePlayhead]);
+  }, [commandTarget, snap, fps, onDiagnostic, pixelsPerSecond, playbackController, playbackSnapshot.available, range.start, playbackRange, updatePlayhead]);
 
   const hitItem = useCallback((clientX: number, clientY: number) => {
     const element = timelineViewportRef.current;
@@ -848,20 +882,23 @@ export function TimelineEditor({
     if (scrubWasPlayingRef.current && playbackController) {
       dispatchSafely(playbackController, { type: "pause", target: commandTarget }, onDiagnostic);
     }
-    seekFromClientX(event.clientX);
+    seekFromClientX(event.clientX, event.altKey);
   }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, playbackSnapshot.playing, seekFromClientX, time, itemEditing, hitItem, dataSource, pixelsPerSecond, range.start, revision]);
 
   const onPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = editDrag.current;
     if (drag && drag.pointer === event.pointerId) {
-      try { setEditPreview(proposeTimelineItemEdit(drag.item, drag.mode, (event.clientX - drag.x) / pixelsPerSecond, range, fps)); }
+      try {
+        drag.preview = proposeTimelineItemEdit(drag.item, drag.mode, (event.clientX - drag.x) / pixelsPerSecond, range, fps, snap && !event.altKey);
+        setEditPreview(drag.preview);
+      }
       catch (error) { onDiagnostic?.({ level: "error", source: "timeline", message: "Cannot edit item", error }); }
       return;
     }
 
     if (pointerIdRef.current !== event.pointerId) return;
-    seekFromClientX(event.clientX);
-  }, [seekFromClientX, pixelsPerSecond, range, fps, onDiagnostic]);
+    seekFromClientX(event.clientX, event.altKey);
+  }, [seekFromClientX, pixelsPerSecond, range, fps, snap, onDiagnostic]);
 
   const finishScrub = useCallback((event: ReactPointerEvent<HTMLDivElement>, cancelled: boolean) => {
     const drag = editDrag.current;
@@ -870,7 +907,8 @@ export function TimelineEditor({
       setEditPreview(null);
       if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
       if (!cancelled && itemEditing && dataSource === drag.source && revision === drag.revision && Math.abs(event.clientX - drag.x) > 2) {
-        try { itemEditing.onCommit(proposeTimelineItemEdit(drag.item, drag.mode, (event.clientX - drag.x) / pixelsPerSecond, range, fps)); }
+        // Commit what the user last saw, even if Alt changes before pointerup.
+        try { itemEditing.onCommit(drag.preview ?? proposeTimelineItemEdit(drag.item, drag.mode, (event.clientX - drag.x) / pixelsPerSecond, range, fps, snap && !event.altKey)); }
         catch (error) { onDiagnostic?.({ level: "error", source: "timeline", message: "Item edit rejected", error }); }
       }
       return;
@@ -895,7 +933,7 @@ export function TimelineEditor({
     pointerIdRef.current = null;
     setScrubbing(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, updatePlayhead, itemEditing, dataSource, revision, pixelsPerSecond, range, fps]);
+  }, [commandTarget, onDiagnostic, playbackController, playbackSnapshot.available, updatePlayhead, itemEditing, dataSource, revision, pixelsPerSecond, range, fps, snap]);
 
   /** Seek transport (skip-to-start/end, frame step) shares scrub's dispatch-or-local-set split. */
   const seekTo = useCallback((nextTime: number) => {
@@ -907,16 +945,14 @@ export function TimelineEditor({
     }
   }, [commandTarget, fps, onDiagnostic, playbackController, playbackSnapshot.available, playbackRange]);
 
+  const currentReadoutTime = () => playbackController && playbackSnapshot.available ? projectTimelinePlaybackTime(playbackSnapshot) : time;
+
   const stepFrame = useCallback((direction: -1 | 1) => {
     const stepped = resolveTimelineSeekTime(time + direction / fps, playbackRange, "frame-snap", fps);
     seekTo(stepped);
   }, [fps, playbackRange, seekTo, time]);
 
-  /**
-   * ArrowLeft/ArrowRight step the playhead one frame while the timeline has
-   * focus. Bound only to the track viewport (not window/document), so typing
-   * arrow keys in an unrelated input elsewhere in the host app is untouched.
-   */
+  /** Editing shortcuts stay local; transport/view shortcuts can be shared with the host. */
   const onViewportKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape" && editDrag.current) {
       const pointer = editDrag.current.pointer;
@@ -926,27 +962,55 @@ export function TimelineEditor({
       event.preventDefault();
       return;
     }
+    if (event.defaultPrevented || event.nativeEvent.isComposing) return;
     const target = event.target as HTMLElement;
     if (target.closest(".timeline-editor__event-cue") && (event.ctrlKey || event.metaKey) && ["z", "y"].includes(event.key.toLowerCase())) {
       clipEditing.onKeyDown(event);
       return;
     }
-    if (target.closest(".timeline-editor__inspector, .timeline-editor__sidebar") || target.isContentEditable || target.closest("input, textarea, select, button") || event.defaultPrevented) return;
-    if (clipEditing.onKeyDown(event)) return;
-    if (duration <= 0 || event.altKey || event.metaKey) return;
-    const key = event.key.toLowerCase();
+    if (target.closest(".timeline-editor__inspector, .timeline-editor__sidebar") || isShortcutInput(target)) return;
+    const button = target.closest("button, [role=button], summary");
+    if (button && !target.closest(".timeline-editor__transport")) return;
+    if (!button && clipEditing.onKeyDown(event)) return;
+    onTransportKeyDown(event);
+  };
+
+  const onTransportKeyDown = (event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey" | "repeat" | "preventDefault">) => {
+    if (duration <= 0) return;
+    const action = keyboardAction(keyboardPreset, event);
     const transport = (type: "play" | "pause") => dispatchSafely(playbackController, { type, target: commandTarget }, onDiagnostic);
-    if (event.ctrlKey && key !== "arrowup") return;
-    if (key === " ") { if (!event.repeat) transport(playbackSnapshot.playing ? "pause" : "play"); }
-    else if (key === "arrowdown") transport("play");
-    else if (key === "k") transport("pause");
-    else if (key === "arrowup") seekTo(event.ctrlKey ? playbackRange.end : playbackRange.start);
-    else if (key === "arrowleft" && !event.ctrlKey) stepFrame(-1);
-    else if (key === "arrowright" && !event.ctrlKey) stepFrame(1);
-    else if (key === "home") { setViewExtent(null); setZoomPixelsPerSecond(null); if (timelineViewportRef.current) timelineViewportRef.current.scrollLeft = 0; }
+    if (action === "toggle") { if (!event.repeat) transport(playbackSnapshot.playing ? "pause" : "play"); }
+    else if (action === "play") transport("play");
+    else if (action === "pause") transport("pause");
+    else if (action === "start") seekTo(playbackRange.start);
+    else if (action === "end") seekTo(playbackRange.end);
+    else if (action === "previous") stepFrame(-1);
+    else if (action === "next") stepFrame(1);
+    else if (action === "loop") { if (!event.repeat) dispatchTransport({ type: "setLooping", looping: !playbackSnapshot.looping }); }
+    else if (action === "autoScroll") { if (!event.repeat) setAutoScroll(value => !value); }
+    else if (action === "zoomIn" || action === "zoomOut") {
+      const element = timelineViewportRef.current;
+      if (element) applyView(zoomAroundAnchor({ pixelsPerSecond, scrollLeft: element.scrollLeft }, action === "zoomIn" ? 1.1 : 1 / 1.1, element.clientWidth / 2, duration, element.clientWidth, allowViewOutsideRange));
+    }
+    else if (action === "fit") { setViewExtent(null); setZoomPixelsPerSecond(null); if (timelineViewportRef.current) timelineViewportRef.current.scrollLeft = 0; }
     else return;
     event.preventDefault();
   };
+
+  const transportKeyDownRef = useRef(onTransportKeyDown);
+  useEffect(() => { transportKeyDownRef.current = onTransportKeyDown; });
+  useEffect(() => {
+    if (shortcutScope !== "document") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (event.defaultPrevented || event.isComposing || !(target instanceof HTMLElement) || rootRef.current?.closest("[inert]")) return;
+      // Local editors handle their own keys, including settings, inspectors and other instances.
+      if (target.closest(".timeline-editor") || isShortcutInput(target) || target.closest("button, [role=button], summary, a[href], [role=menu], [role=dialog], [role=checkbox], [role=radio], [role=tab], [role=tablist], [role=menuitem], [role=menuitemcheckbox], [role=menuitemradio], [role=switch], [role=application], [role=listbox], [role=option], [role=tree], [role=treeitem], [role=grid], [role=gridcell], [role=separator], [role=scrollbar], dialog, [inert]")) return;
+      transportKeyDownRef.current(event);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [shortcutScope]);
 
   const dispatchLoopRange = useCallback((next: TimeRange | null) => {
     if (playbackController && playbackSnapshot.available) {
@@ -956,22 +1020,22 @@ export function TimelineEditor({
     }
   }, [commandTarget, playbackRange, onDiagnostic, playbackController, playbackSnapshot.available]);
 
-  const loopTimeFromClientX = useCallback((clientX: number) => {
+  const loopTimeFromClientX = useCallback((clientX: number, bypass = false) => {
     const element = timelineViewportRef.current;
     if (!element) return playbackRange.start;
     return resolveTimelineSeekTime(
       range.start + (clientX - element.getBoundingClientRect().left + element.scrollLeft) / pixelsPerSecond,
       playbackRange,
-      "frame-snap",
+      snap && !bypass ? "frame-snap" : "unsnapped",
       fps,
     );
-  }, [fps, pixelsPerSecond, range.start, playbackRange]);
+  }, [snap, fps, pixelsPerSecond, range.start, playbackRange]);
 
   const onLoopLanePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     event.stopPropagation();
     loopPointerIdRef.current = event.pointerId;
-    const origin = loopTimeFromClientX(event.clientX);
+    const origin = loopTimeFromClientX(event.clientX, event.altKey);
     loopDragOriginRef.current = origin;
     event.currentTarget.setPointerCapture(event.pointerId);
     setLoopDragPreview({ start: origin, end: origin });
@@ -979,7 +1043,7 @@ export function TimelineEditor({
 
   const onLoopLanePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (loopPointerIdRef.current !== event.pointerId) return;
-    const current = loopTimeFromClientX(event.clientX);
+    const current = loopTimeFromClientX(event.clientX, event.altKey);
     const origin = loopDragOriginRef.current;
     setLoopDragPreview({ start: Math.min(origin, current), end: Math.max(origin, current) });
   }, [loopTimeFromClientX]);
@@ -1009,46 +1073,96 @@ export function TimelineEditor({
   const applyView = useCallback((desired: ViewRange) => {
     const current = rangeRef.current;
     const width = timelineViewportRef.current?.clientWidth ?? 0;
-    const start = Math.min(current.start, current.start + desired.scrollLeft / desired.pixelsPerSecond);
-    const end = Math.max(current.end, current.start + (desired.scrollLeft + width) / desired.pixelsPerSecond);
+    if (!allowViewOutsideRange) {
+      const pps = clampPixelsPerSecond(desired.pixelsPerSecond, current.end - current.start, width);
+      desired = { pixelsPerSecond: pps, scrollLeft: clampScrollLeft(desired.scrollLeft, current.end - current.start, pps, width) };
+    }
+    const start = allowViewOutsideRange ? Math.min(current.start, current.start + desired.scrollLeft / desired.pixelsPerSecond) : current.start;
+    const end = allowViewOutsideRange ? Math.max(current.end, current.start + (desired.scrollLeft + width) / desired.pixelsPerSecond) : current.end;
     const next = { ...desired, scrollLeft: desired.scrollLeft + (current.start - start) * desired.pixelsPerSecond };
     rangeRef.current = { start, end };
-    setViewExtent({ start, end });
+    setViewExtent(allowViewOutsideRange ? { start, end } : null);
     pendingViewRef.current = next;
     setZoomPixelsPerSecond(next.pixelsPerSecond);
     pendingScrollLeftRef.current = next.scrollLeft;
     setScroll((current) => (current.left === next.scrollLeft ? current : { ...current, left: next.scrollLeft }));
-  }, []);
+  }, [allowViewOutsideRange]);
+
+  const panHandlers = usePointerNavigation(timelineViewportRef, keyboardPreset, (clientX) => {
+    const element = timelineViewportRef.current!;
+    const startRange = { ...rangeRef.current };
+    const base = pendingViewRef.current ?? { pixelsPerSecond, scrollLeft: element.scrollLeft };
+    const anchor = clientX - element.getBoundingClientRect().left;
+    return (dx: number | null) => {
+      if (dx === null) {
+        rangeRef.current = startRange;
+        applyView(base);
+        rangeRef.current = startRange;
+        setViewExtent(viewExtent);
+        setZoomPixelsPerSecond(zoomPixelsPerSecond);
+        return;
+      }
+      const next = zoomAroundAnchor(base, Math.exp(dx * 0.005), anchor, startRange.end - startRange.start, element.clientWidth, allowViewOutsideRange);
+      applyView({ ...next, scrollLeft: next.scrollLeft + (startRange.start - rangeRef.current.start) * next.pixelsPerSecond });
+    };
+  });
+
+  useEffect(() => {
+    if (!playbackController || !playbackSnapshot.available || !playbackSnapshot.playing || typeof requestAnimationFrame === "undefined") return;
+    let frame = 0;
+    const tick = () => {
+      const nextTime = projectTimelinePlaybackTime(playbackSnapshot);
+      updatePlayhead(nextTime);
+      const element = timelineViewportRef.current;
+      // Page only when the head leaves the visible area. Keep zoom and vertical scroll.
+      if (autoScroll && element && element.clientWidth > 0 && !scrubbing && !editDrag.current &&
+          loopPointerIdRef.current === null && !rangeDragRef.current && !playbackRangePreview &&
+          !clipEditing.indicator && !element.parentElement?.classList.contains("is-panning")) {
+        const currentRange = rangeRef.current;
+        const x = (nextTime - currentRange.start) * pixelsPerSecond;
+        const left = pendingViewRef.current?.scrollLeft ?? element.scrollLeft;
+        const width = element.clientWidth;
+        if (x < left || x > left + width) {
+          const maxLeft = Math.max(0, (Math.max(currentRange.end, playbackRange.end) - currentRange.start) * pixelsPerSecond - width);
+          const desiredLeft = Math.min(maxLeft, Math.max(nextTime < currentRange.start ? -Infinity : 0, x - width * 0.2));
+          const nextLeft = allowViewOutsideRange ? desiredLeft : clampScrollLeft(desiredLeft, duration, pixelsPerSecond, width);
+          if (Math.abs(nextLeft - left) > 0.5) applyView({ pixelsPerSecond, scrollLeft: nextLeft });
+        }
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [playbackController, playbackSnapshot, updatePlayhead, autoScroll, scrubbing, playbackRangePreview, clipEditing.indicator, pixelsPerSecond, playbackRange.end, allowViewOutsideRange, duration, applyView]);
 
   const viewRef = useRef<{ pixelsPerSecond: number; duration: number; width: number }>({ pixelsPerSecond, duration, width: viewport.width });
   viewRef.current = { pixelsPerSecond, duration, width: viewport.width };
 
-  /**
-   * Wheel over the ruler or the track viewport (UE Sequencer conventions):
-   *   wheel        -> zoom the time axis around the pointer
-   *   Ctrl+wheel   -> zoom row height (vertical)
-   *   Shift+wheel  -> pan horizontally (a trackpad's horizontal delta pans too)
-   * Native listener (not React's onWheel) so the default page/viewport
-   * scroll can be prevented — React registers wheel as passive.
-   */
+  /** Non-passive wheel navigation follows the selected operation preset. */
   useEffect(() => {
     const viewportElement = timelineViewportRef.current;
     if (!viewportElement) return;
     const onWheel = (event: WheelEvent) => {
       if (editDrag.current) { event.preventDefault(); return; }
-      if (event.altKey || event.metaKey) return;
+      const action = wheelAction(keyboardPreset, event);
+      if (!action) return;
       const { duration: clipDuration, width } = viewRef.current;
       const base: ViewRange = pendingViewRef.current ?? { pixelsPerSecond: viewRef.current.pixelsPerSecond, scrollLeft: viewportElement.scrollLeft };
       const pps = base.pixelsPerSecond;
-      if (event.ctrlKey) {
+      if (action === "row-zoom") {
         event.preventDefault();
         setRowZoom((zoom) => clampRowZoom(zoom * wheelRowZoomFactor(event.deltaY, event.deltaMode)));
         return;
       }
-      const horizontal = event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY);
-      if (horizontal) {
+      if (action === "pan-y") {
         event.preventDefault();
-        const raw = event.shiftKey ? (event.deltaY || event.deltaX) : event.deltaX;
+        const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaMode === 2 ? event.deltaY * viewportElement.clientHeight : event.deltaY;
+        viewportElement.scrollTop += delta;
+        return;
+      }
+      if (action === "pan-x") {
+        event.preventDefault();
+        const raw = event.shiftKey || event.ctrlKey || event.metaKey ? (event.deltaY || event.deltaX) : event.deltaX;
         const delta = event.deltaMode === 1 ? raw * 16 : event.deltaMode === 2 ? raw * width : raw;
         applyView({ pixelsPerSecond: pps, scrollLeft: base.scrollLeft + delta });
         return;
@@ -1062,7 +1176,7 @@ export function TimelineEditor({
         anchorX,
         clipDuration,
         width,
-        true,
+        allowViewOutsideRange,
       ));
     };
     const rulerElement = rulerRef.current;
@@ -1072,7 +1186,7 @@ export function TimelineEditor({
       viewportElement.removeEventListener("wheel", onWheel);
       rulerElement?.removeEventListener("wheel", onWheel);
     };
-  }, [applyView]);
+  }, [applyView, allowViewOutsideRange, keyboardPreset]);
 
   const thumb = viewRangeThumb({ pixelsPerSecond, scrollLeft: scroll.left }, duration, viewport.width);
 
@@ -1128,7 +1242,7 @@ export function TimelineEditor({
       ? { start: drag.thumb.start + dx, end: drag.thumb.end }
       : { start: drag.thumb.start, end: drag.thumb.end + dx };
     applyDrag(viewRangeFromThumb(next, dragDuration, width, drag.mode === "start" ? "end" : "start", true));
-  }, [applyView]);
+  }, [applyView, allowViewOutsideRange, keyboardPreset]);
 
   const onRangeBarPointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = rangeDragRef.current;
@@ -1308,46 +1422,138 @@ export function TimelineEditor({
           )}
           <div className="timeline-editor__slot">{slots?.toolbarStart}</div>
           <div className="timeline-editor__transport" role="group" aria-label="Playback controls">
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Skip to start (Up)" aria-label="Skip to start" onClick={() => seekTo(playbackRange.start)}><SkipPreviousIcon /></button>
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Previous frame (Left)" aria-label="Previous frame" onClick={() => stepFrame(-1)}><NavigateBeforeIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title={shortcutTitle("Skip to start", "start")} aria-label="Skip to start" onClick={() => seekTo(playbackRange.start)}><SkipPreviousIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title={shortcutTitle("Previous frame", "previous")} aria-label="Previous frame" onClick={() => stepFrame(-1)}><NavigateBeforeIcon /></button>
             <button
               type="button"
               className="timeline-editor__button"
               disabled={!canTransport}
-              title="Play / Pause (Space)"
+              title={shortcutTitle("Play / Pause", "toggle")}
               aria-label={playbackSnapshot.playing ? "Pause" : "Play"}
               onClick={() => dispatchTransport(playbackSnapshot.playing ? { type: "pause" } : { type: "play" })}
             >
               {playbackSnapshot.playing ? <PauseIcon /> : <PlayIcon />}
             </button>
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Next frame (Right)" aria-label="Next frame" onClick={() => stepFrame(1)}><NavigateNextIcon /></button>
-            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title="Skip to end (Ctrl+Up)" aria-label="Skip to end" onClick={() => seekTo(playbackRange.end)}><SkipNextIcon /></button>
-            <button type="button" className={`timeline-editor__button${playbackSnapshot.looping ? " is-active" : ""}`} disabled={!canTransport} title="Toggle loop playback" aria-label="Loop" onClick={() => dispatchTransport({ type: "setLooping", looping: !playbackSnapshot.looping })}><RepeatIcon /></button>
-            <button
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title={shortcutTitle("Next frame", "next")} aria-label="Next frame" onClick={() => stepFrame(1)}><NavigateNextIcon /></button>
+            <button type="button" className="timeline-editor__button" disabled={duration <= 0} title={shortcutTitle("Skip to end", "end")} aria-label="Skip to end" onClick={() => seekTo(playbackRange.end)}><SkipNextIcon /></button>
+            <button type="button" className={`timeline-editor__button${playbackSnapshot.looping ? " is-active" : ""}`} disabled={!canTransport} title={shortcutTitle("Toggle loop playback", "loop")} aria-label="Loop" onClick={() => dispatchTransport({ type: "setLooping", looping: !playbackSnapshot.looping })}><RepeatIcon /></button>
+            <button type="button" className={`timeline-editor__button${snap ? " is-active" : ""}`} aria-label="Snap to frames" aria-pressed={snap} title={`Snap to frames: ${snap ? "On" : "Off"} · ${keyboardPreset === "unity" ? "Hold Alt after starting a drag to bypass; Alt+drag pans" : "Alt-drag to bypass"}`} onClick={() => setSnap(!snap)}><SnapIcon /></button>
+            {editingRate ? <PlaybackRateInput rate={playbackRate} label="Playback rate" disabled={!canTransport} autoFocus onCommit={rate => dispatchTransport({ type: "setRate", rate })} onFinish={() => setEditingRate(false)} /> : <button
               type="button"
               className={`timeline-editor__button timeline-editor__button--rate${playbackRate !== 1 ? " is-active" : ""}`}
               disabled={!canTransport}
-              title="Cycle playback rate" aria-label="Playback rate"
-              onClick={() => dispatchTransport({ type: "setRate", rate: nextTimelineRate(playbackRate) })}
+              title="Enter playback rate" aria-label="Playback rate"
+              onClick={() => setEditingRate(true)}
             >
               {formatTimelineRate(playbackRate)}
-            </button>
+            </button>}
           </div>
-          <button ref={readoutRef} type="button" className="timeline-editor__readout" onClick={() => setDisplayMode((mode) => mode === "frames" ? "seconds" : "frames")} title="Switch frames / seconds" aria-label="Toggle time display">{playbackReadout}</button>
-          {frameRateOptions ? (
-            <select
-              className="timeline-editor__fps timeline-editor__fps-select"
-              aria-label="Frame rate"
-              value={frameRateValue ?? String(fps)}
-              onChange={(event) => onFrameRateChange?.(event.target.value)}
-            >
-              {frameRateOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
+          {timeDraft === null ? (
+            <button ref={readoutRef} type="button" className="timeline-editor__readout"
+              disabled={Boolean(playbackController && !playbackSnapshot.available)}
+              onClick={() => setTimeDraft(String(displayMode === "frames" ? Math.round(currentReadoutTime() * fps) : currentReadoutTime()))}
+              onKeyDown={event => { if (event.key === "Enter" || event.key === "F2") { event.preventDefault(); setTimeDraft(String(displayMode === "frames" ? Math.round(currentReadoutTime() * fps) : currentReadoutTime())); } }}
+              title="Click to enter current time" aria-label="Current time">{playbackReadout}</button>
           ) : (
-            <span className="timeline-editor__fps">{fps} fps</span>
+            <input ref={timeInputRef} className="timeline-editor__readout timeline-editor__time-input" type="number"
+              aria-label={displayMode === "frames" ? "Current frame" : "Current seconds"}
+              step={displayMode === "frames" ? 1 : 1 / fps} value={timeDraft}
+              onChange={event => setTimeDraft(event.target.value)} onBlur={() => setTimeDraft(null)}
+              onKeyDown={event => {
+                event.stopPropagation();
+                if (event.key === "Escape") { event.preventDefault(); setTimeDraft(null); }
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  const value = Number(timeDraft);
+                  if (timeDraft.trim() !== "" && Number.isFinite(value)) {
+                    seekTo(displayMode === "frames" ? value / fps : value);
+                    setTimeDraft(null);
+                  }
+                }
+              }} />
           )}
-          {editing && <button type="button" className="timeline-editor__button timeline-editor__button--text" aria-label="Snap to frames" aria-pressed={snap} title="Snap to frames · Alt-drag to bypass" onClick={() => setSnap(!snap)}>Snap</button>}
-          <div className="timeline-editor__slot timeline-editor__slot--end">{slots?.toolbarEnd}
+          <div className="timeline-editor__slot timeline-editor__slot--end">
+          <details ref={settingsRef} className="timeline-editor__settings" onKeyDown={event => {
+            event.stopPropagation();
+            if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); }
+          }}>
+            <summary className="timeline-editor__button" aria-label="Timeline settings" title="Timeline settings"><SettingsIcon /></summary>
+            <div className="timeline-editor__settings-panel" style={{ maxHeight: viewport.height }}>
+              <span className="timeline-editor__settings-heading">Controls</span>
+              <label>Operation preset
+                <select aria-label="Operation preset" value={keyboardPreset} onChange={event => setKeyboardPreset(normalizeKeyboardPreset(event.target.value))}>
+                  {Object.entries(keyboardPresets).map(([value, preset]) => <option key={value} value={value}>{preset.label}</option>)}
+                </select>
+              </label>
+              <label>Auto scroll
+                <input type="checkbox" aria-label="Auto scroll" checked={autoScroll} onChange={event => setAutoScroll(event.target.checked)} />
+              </label>
+              <span className="timeline-editor__settings-heading">Display</span>
+              <label>Time display
+                <select aria-label="Time display" value={displayMode} onChange={event => setDisplayMode(event.target.value as "frames" | "seconds")}>
+                  <option value="frames">Frames</option><option value="seconds">Seconds</option>
+                </select>
+              </label>
+              <label>Frame rate
+                {frameRateOptions ? (
+                  <select
+                    className="timeline-editor__fps timeline-editor__fps-select"
+                    aria-label="Frame rate"
+                    value={frameRateValue ?? String(fps)}
+                    onChange={(event) => onFrameRateChange?.(event.target.value)}
+                  >
+                    {frameRateOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                ) : onFrameRateChange ? (
+                  <input key={fps} type="number" aria-label="Frame rate" defaultValue={fps} step="any"
+                    onBlur={event => {
+                      const value = Number(event.currentTarget.value);
+                      if (event.currentTarget.value.trim() && Number.isFinite(value) && value > 0 && value !== fps) onFrameRateChange(String(value));
+                      event.currentTarget.value = String(fps);
+                    }}
+                    onKeyDown={event => {
+                      event.stopPropagation();
+                      if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); }
+                      if (event.key === "Escape") { event.preventDefault(); event.currentTarget.value = String(fps); event.currentTarget.blur(); }
+                    }} />
+                ) : (
+                  <span className="timeline-editor__fps">{fps} fps</span>
+                )}
+              </label>
+              <span className="timeline-editor__settings-heading">Playback</span>
+              {(["start", "end"] as const).map(edge => {
+                const displayed = displayMode === "frames" ? Math.round(playbackRange[edge] * fps) : playbackRange[edge];
+                return <label key={edge}> {edge === "start" ? "Start" : "End"} ({displayMode === "frames" ? "f" : "s"})
+                  <input key={`${displayed}:${displayMode}:${fps}`} type="number" aria-label={`Playback ${edge} time`}
+                    defaultValue={displayed} step={displayMode === "frames" ? 1 : 1 / fps}
+                    disabled={!canTransport || !onChangePlaybackRange}
+                    onBlur={event => { event.currentTarget.value = String(displayed); }}
+                    onKeyDown={event => {
+                      event.stopPropagation();
+                      if (event.key === "Escape") { event.preventDefault(); event.currentTarget.value = String(displayed); event.currentTarget.blur(); }
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        const raw = event.currentTarget.value;
+                        const value = Number(raw);
+                        const seconds = displayMode === "frames" ? Math.round(value) / fps : Math.round(value * fps) / fps;
+                        if (raw.trim() && Number.isFinite(seconds)) {
+                          const next = edge === "start"
+                            ? { start: Math.min(seconds, playbackRange.end - 1 / fps), end: playbackRange.end }
+                            : { start: playbackRange.start, end: Math.max(seconds, playbackRange.start + 1 / fps) };
+                          if (next[edge] !== playbackRange[edge]) onChangePlaybackRange?.(next);
+                          event.currentTarget.blur();
+                        }
+                      }
+                    }} />
+                </label>;
+              })}
+              <label>Speed
+                <PlaybackRateInput rate={playbackRate} label="Playback speed" disabled={!canTransport} onCommit={rate => dispatchTransport({ type: "setRate", rate })} />
+              </label>
+              {slots?.settings}
+            </div>
+          </details>
+            {slots?.toolbarEnd}
             {sidebar && <button type="button" className="timeline-editor__button timeline-editor__sidebar-toggle" aria-label={`Toggle ${sidebar.title}`} title={`Toggle ${sidebar.title}`} aria-controls={sidebarId} aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(open => !open)}>{sidebar.title}</button>}
           </div>
         </div>
@@ -1382,10 +1588,10 @@ export function TimelineEditor({
             onPointerUp={(event) => finishScrub(event, false)}
             onPointerCancel={(event) => finishScrub(event, true)}
           >
-            {canTransport && onChangePlaybackRange && <PlaybackRangeHandles range={playbackRangePreview ?? playbackRange} viewStart={range.start} scale={pixelsPerSecond} scrollLeft={scroll.left} width={viewport.width} fps={fps} displayMode={displayMode} onPreview={setPlaybackRangePreview} onChange={onChangePlaybackRange} />}
+            {canTransport && onChangePlaybackRange && <PlaybackRangeHandles snap={snap} range={playbackRangePreview ?? playbackRange} viewStart={range.start} scale={pixelsPerSecond} scrollLeft={scroll.left} width={viewport.width} fps={fps} displayMode={displayMode} onPreview={setPlaybackRangePreview} onChange={onChangePlaybackRange} />}
             <span ref={tickWidthProbeRef} className="timeline-editor__tick timeline-editor__tick--measure" aria-hidden="true">00000000</span>
             {ticks.map((tick) => <span className="timeline-editor__tick" key={tick} style={{ left: `${Math.max(tickLabelWidth / 2, Math.min(viewport.width - tickLabelWidth / 2, ((tick - range.start) * pixelsPerSecond) - scroll.left))}px` }}>{formatTimelineTick(tick, displayMode, fps)}</span>)}
-            <div
+            {canTransport && playbackSnapshot.looping && <div
               className="timeline-editor__loop-lane"
               aria-label="Loop range"
               title="Drag to set a loop range. Double-click to clear."
@@ -1394,7 +1600,7 @@ export function TimelineEditor({
               onPointerUp={finishLoopDrag}
               onPointerCancel={finishLoopDrag}
               onDoubleClick={clearLoopRange}
-            />
+            />}
           </div>
           <div
             className="timeline-editor__viewport"
@@ -1420,7 +1626,7 @@ export function TimelineEditor({
             {canTransport && [(playbackRangePreview ?? playbackRange).start, (playbackRangePreview ?? playbackRange).end].map((boundary, index) => <div key={index} className={`timeline-editor__playback-boundary timeline-editor__playback-boundary--${index === 0 ? "start" : "end"}`} title={index === 0 ? "Playback start" : "Playback end"} style={{ left: (boundary - range.start) * pixelsPerSecond, height: Math.max(totalHeight, viewport.height) }} />)}
             <div className="timeline-editor__range-action">{slots?.diagnosticAction}</div>
           </div>
-          {loopRangeStyle && (
+          {canTransport && playbackSnapshot.looping && loopRangeStyle && (
             <div className="timeline-editor__loop-region" style={loopRangeStyle}>
               {!loopDragPreview && (
                 <button type="button" className="timeline-editor__loop-clear" title="Clear loop range" aria-label="Clear loop range" onClick={clearLoopRange}>×</button>

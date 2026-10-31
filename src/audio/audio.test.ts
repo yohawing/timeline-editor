@@ -121,3 +121,16 @@ it("loops a trimmed source without restarting on each source wrap", async () => 
   audio.sync(sample(60, { duration: 60 }), false, placement);
   expect(nodes[1].stop).toHaveBeenCalled();
 });
+
+
+it("plays a negative placement from the matching source offset at frame zero and on loop restart", async () => {
+  const { audio, nodes } = fixture(); await audio.load(new ArrayBuffer(0));
+  const placement = { start: -2, end: 18 };
+  audio.sync(sample(0), false, placement);
+  expect(nodes[0].start).toHaveBeenCalledWith(0, 2, 12);
+  audio.sync(sample(5), true, placement);
+  expect(nodes[1].start).toHaveBeenCalledWith(0, 7, 7);
+  audio.sync(sample(0, { looping: true, loopRange: { start: 0, end: 5 } }), true, placement);
+  expect(nodes[2].start).toHaveBeenCalledWith(0, 2, 5);
+  audio.dispose();
+});
